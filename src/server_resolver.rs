@@ -46,7 +46,7 @@ pub struct Endpoint {
 }
 
 /// A resolver for Matrix server names.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MatrixResolver {
     resolver: trust_dns_resolver::TokioAsyncResolver,
     http_client: Client<HttpsConnector<HttpConnector>>,
@@ -246,7 +246,7 @@ pub struct WellKnownServer {
 
 /// A connector that can be used with a [`hyper::Client`] that correctly
 /// resolves and connects to `matrix://` URIs.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
 }
