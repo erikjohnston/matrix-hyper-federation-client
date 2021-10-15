@@ -8,7 +8,7 @@ use hyper::client::connect::{Connection, HttpConnector};
 use hyper::service::Service;
 use hyper::Client;
 use hyper_tls::{HttpsConnector, MaybeHttpsStream};
-use log::debug;
+use log::{debug, trace};
 use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -125,6 +125,8 @@ impl MatrixResolver {
         mut host: String,
         mut port: Option<u16>,
     ) -> Result<Vec<Endpoint>, Error> {
+        debug!("Resolving host={}, port={:?}", host, port);
+
         let mut authority = if let Some(p) = port {
             format!("{}:{}", host, p)
         } else {
@@ -148,10 +150,16 @@ impl MatrixResolver {
             host = a.host().to_string();
             port = a.port_u16();
             authority = a.to_string();
+
+            debug!("Found .well-known, returned {}", &server.server);
+        } else {
+            debug!("No .well-known found");
         }
 
         // If a literal IP or includes port then we short circuit.
         if host.parse::<IpAddr>().is_ok() || port.is_some() {
+            debug!("Host is IP or port is set");
+
             return Ok(vec![Endpoint {
                 host: host.clone(),
                 port: port.unwrap_or(8448),
@@ -170,12 +178,13 @@ impl MatrixResolver {
             Ok(records) => records,
             Err(err) => match err.kind() {
                 ResolveErrorKind::NoRecordsFound { .. } => {
+                    debug!("SRV returned not found, using host and port 8448");
                     return Ok(vec![Endpoint {
                         host: host.clone(),
                         port: 8448,
                         host_header: authority.to_string(),
                         tls_name: host.clone(),
-                    }])
+                    }]);
                 }
                 _ => return Err(err.into()),
             },
@@ -202,6 +211,11 @@ impl MatrixResolver {
                 tls_name: host.to_string(),
             }))
         }
+
+        debug!(
+            "SRV returned {} results. First: host={} port={}",
+            count, &results[0].host, &results[0].port
+        );
 
         Ok(results)
     }
@@ -290,7 +304,14 @@ impl Service<Uri> for MatrixConnector {
 
             for endpoint in endpoints {
                 match try_connecting(&dst, &endpoint).await {
-                    Ok(r) => return Ok(r),
+                    Ok(r) => {
+                        trace!(
+                            "Connected to host={} port={}",
+                            &endpoint.host,
+                            &endpoint.port
+                        );
+                        return Ok(r);
+                    }
                     // Errors here are not unexpected, and we just move on
                     // with our lives.
                     Err(e) => debug!(
