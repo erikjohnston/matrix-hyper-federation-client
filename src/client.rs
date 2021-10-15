@@ -39,7 +39,7 @@ pub async fn new_federation_client() -> Result<FederationClient, Error> {
 /// needs to deserialize the JSON request body so that it can be correctly
 /// signed.
 #[derive(Clone)]
-pub struct SigningFederationClient<C> {
+pub struct SigningFederationClient<C = MatrixConnector> {
     client: Client<C>,
     server_name: String,
     key_id: String,
