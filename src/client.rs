@@ -1,5 +1,7 @@
 //! Module for sending Matrix federation requests
 
+use std::convert::TryInto;
+
 use anyhow::{bail, format_err, Context, Error};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
@@ -133,7 +135,7 @@ where
         )
         .context("Failed to sign request")?;
 
-        parts.headers.append(AUTHORIZATION, auth_header.parse()?);
+        parts.headers.insert(AUTHORIZATION, auth_header.parse()?);
 
         let new_body = if let Some(raw_value) = content {
             raw_value.to_string().into()
@@ -206,7 +208,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
     server_name: &str,
     key_id: &str,
     secret_key: &SecretKey,
-    request_builder: Builder,
+    mut request_builder: Builder,
     content: Option<T>,
 ) -> Result<Request<Body>, Error> {
     let uri = request_builder
@@ -234,7 +236,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
         None
     };
 
-    let header_value = make_auth_header(
+    let header_string = make_auth_header(
         server_name,
         key_id,
         secret_key,
@@ -244,15 +246,19 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
         canonical_content.as_ref(),
     )?;
 
+    let header_value = header_string.try_into()?;
+
     let body = if let Some(c) = canonical_content {
         Body::from(c.into_canonical())
     } else {
         Body::default()
     };
 
-    let request = request_builder
-        .header(AUTHORIZATION, header_value)
-        .body(body)?;
+    request_builder
+        .headers_mut()
+        .map(|header_map| header_map.insert(AUTHORIZATION, header_value));
+
+    let request = request_builder.body(body)?;
     Ok(request)
 }
 
