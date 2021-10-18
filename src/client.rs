@@ -5,7 +5,6 @@ use std::convert::TryInto;
 use anyhow::{bail, format_err, Context, Error};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
-use http::uri::Authority;
 use http::{HeaderValue, Uri};
 use hyper::body::{to_bytes, HttpBody};
 use hyper::client::connect::Connect;
@@ -106,7 +105,7 @@ where
     /// For `matrix://` URIs the request body must be JSON (if not empty) and
     /// the request will be signed.
     pub async fn request(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
-        if req.uri().authority() != Some(&Authority::from_static("matrix")) {
+        if req.uri().scheme() != Some(&"matrix".parse()?) {
             return Ok(self.client.request(req).await?);
         }
         if !req.body().is_end_stream()
