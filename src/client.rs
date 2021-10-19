@@ -291,6 +291,15 @@ pub trait SignedRequestBuilderExt {
         secret_key: &SecretKey,
         content: T,
     ) -> Result<Request<Body>, Error>;
+
+    /// Sign and build the request with optional JSON body.
+    fn signed_json_opt<T: Serialize>(
+        self,
+        server_name: &str,
+        key_id: &str,
+        secret_key: &SecretKey,
+        content: Option<T>,
+    ) -> Result<Request<Body>, Error>;
 }
 
 impl SignedRequestBuilderExt for Builder {
@@ -312,6 +321,59 @@ impl SignedRequestBuilderExt for Builder {
     ) -> Result<Request<Body>, Error> {
         sign_and_build_json_request(server_name, key_id, secret_key, self, Some(content))
     }
+
+    fn signed_json_opt<T: Serialize>(
+        self,
+        server_name: &str,
+        key_id: &str,
+        secret_key: &SecretKey,
+        content: Option<T>,
+    ) -> Result<Request<Body>, Error> {
+        if let Some(content) = content {
+            self.signed_json(server_name, key_id, secret_key, content)
+        } else {
+            self.signed(server_name, key_id, secret_key)
+        }
+    }
+}
+
+/// A parsed Matrix `Authorization` header.
+pub struct AuthHeader<'a> {
+    pub origin: &'a str,
+    pub key_id: &'a str,
+    pub signature: &'a str,
+}
+
+pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
+    let header = header.strip_prefix("X-Matrix ")?;
+
+    let mut origin = None;
+    let mut key_id = None;
+    let mut signature = None;
+    for item in header.split(',') {
+        let (key, value) = item.split_at(item.find('=')?);
+        let value = value.trim_matches('=');
+
+        // Strip out any quotes.
+        let value = if value.starts_with('"') && value.ends_with('"') {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        };
+
+        match key {
+            "origin" => origin = Some(value),
+            "key" => key_id = Some(value),
+            "sig" => signature = Some(value),
+            _ => {}
+        }
+    }
+
+    Some(AuthHeader {
+        origin: origin?,
+        key_id: key_id?,
+        signature: signature?,
+    })
 }
 
 #[cfg(test)]
@@ -321,6 +383,17 @@ mod test {
     use sodiumoxide::crypto::sign::{keypair_from_seed, Seed};
 
     use super::*;
+
+    #[test]
+    fn test_parse_auth_header() {
+        let header =
+            parse_auth_header(r#"X-Matrix origin=foo.com,key="key_id",sig="some_signature""#)
+                .unwrap();
+
+        assert_eq!(header.origin, "foo.com");
+        assert_eq!(header.key_id, "key_id");
+        assert_eq!(header.signature, "some_signature");
+    }
 
     #[tokio::test]
     async fn auth_header_no_content() {
