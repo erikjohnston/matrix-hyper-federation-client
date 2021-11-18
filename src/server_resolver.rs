@@ -1,6 +1,6 @@
 //! Module for resolving Matrix server names.
 
-use anyhow::{format_err, Error};
+use anyhow::{bail, format_err, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
 use http::Uri;
@@ -336,6 +336,13 @@ async fn try_connecting(
     endpoint: &Endpoint,
 ) -> Result<MaybeHttpsStream<TcpStream>, Error> {
     let tcp = TcpStream::connect((&endpoint.host as &str, endpoint.port)).await?;
+
+    match dst.scheme_str() {
+        Some("http") => return Ok(tcp.into()),
+        Some("https" | "matrix") => {}
+        Some(s) => bail!("Unknown scheme '{}'", s),
+        None => bail!("URL missing scheme"),
+    }
 
     let connector: AsyncTlsConnector = if dst.host().expect("hostname").contains("localhost") {
         TlsConnector::builder()
