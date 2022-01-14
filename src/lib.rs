@@ -6,11 +6,10 @@
 //! automatically signs such requests:
 //!
 //! ```no_run
-//! # use sodiumoxide::crypto::sign::gen_keypair;
+//! # use ed25519_dalek::Keypair;
 //! # use matrix_hyper_federation_client::SigningFederationClient;
 //! #
-//! # async fn run() -> Result<(), anyhow::Error> {
-//! # let (_, secret_key) = gen_keypair();
+//! # async fn run(secret_key: Keypair) -> Result<(), anyhow::Error> {
 //! #
 //! let client = SigningFederationClient::new("local_server", "ed25519:sg5Sa", secret_key).await?;
 //!
@@ -33,13 +32,12 @@
 //! requests automatically:
 //!
 //! ```no_run
-//! # use sodiumoxide::crypto::sign::gen_keypair;
 //! # use matrix_hyper_federation_client::client::{new_federation_client, sign_and_build_json_request};
 //! # use hyper::Request;
 //! use matrix_hyper_federation_client::SignedRequestBuilderExt;
+//! # use ed25519_dalek::Keypair;
 //! #
-//! # async fn run() -> Result<(), anyhow::Error> {
-//! # let (_, secret_key) = gen_keypair();
+//! # async fn run(secret_key: &Keypair) -> Result<(), anyhow::Error> {
 //! #
 //! let client = new_federation_client().await?;
 //!
