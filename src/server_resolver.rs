@@ -1,17 +1,17 @@
 //! Module for resolving Matrix server names.
 
-use anyhow::{bail, format_err, Error};
+use anyhow::{bail, format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
-use http::Uri;
-use hyper::client::connect::{Connection, HttpConnector};
+use http::header::HOST;
+use http::{Request, Uri};
+use hyper::client::connect::Connect;
 use hyper::service::Service;
-use hyper::Client;
+use hyper::{Body, Client};
 use hyper_tls::{HttpsConnector, MaybeHttpsStream};
 use log::{debug, trace};
 use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsConnector as AsyncTlsConnector;
 use trust_dns_resolver::error::ResolveErrorKind;
@@ -49,15 +49,14 @@ pub struct Endpoint {
 #[derive(Debug, Clone)]
 pub struct MatrixResolver {
     resolver: trust_dns_resolver::TokioAsyncResolver,
-    http_client: Client<HttpsConnector<HttpConnector>>,
 }
 
 impl MatrixResolver {
-    /// Create a new [`MatrixResolver`] with a default HTTP client.
+    /// Create a new [`MatrixResolver`]
     pub async fn new() -> Result<MatrixResolver, Error> {
-        let http_client = hyper::Client::builder().build(HttpsConnector::new());
+        let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
 
-        MatrixResolver::with_http_client(http_client).await
+        Ok(MatrixResolver { resolver })
     }
 
     /// Resolves a Matrix server name to a list of [`Endpoint`]s to try.
@@ -93,18 +92,6 @@ impl MatrixResolver {
         self.resolve_server_name_from_host_port(host, port).await
     }
 
-    /// Create a new [`MatrixResolver`] with a given HTTP client.
-    pub async fn with_http_client(
-        http_client: Client<HttpsConnector<HttpConnector>>,
-    ) -> Result<MatrixResolver, Error> {
-        let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
-
-        Ok(MatrixResolver {
-            resolver,
-            http_client,
-        })
-    }
-
     /// Resolves a [`Uri`] to a list of [`Endpoint`]s to try.
     ///
     /// See [`MatrixResolver::resolve_server_name`].
@@ -122,12 +109,12 @@ impl MatrixResolver {
     /// See [`MatrixResolver::resolve_server_name`].
     pub async fn resolve_server_name_from_host_port(
         &self,
-        mut host: String,
-        mut port: Option<u16>,
+        host: String,
+        port: Option<u16>,
     ) -> Result<Vec<Endpoint>, Error> {
         debug!("Resolving host={}, port={:?}", host, port);
 
-        let mut authority = if let Some(p) = port {
+        let authority = if let Some(p) = port {
             format!("{}:{}", host, p)
         } else {
             host.to_string()
@@ -142,18 +129,6 @@ impl MatrixResolver {
                 host_header: authority.to_string(),
                 tls_name: host.to_string(),
             }]);
-        }
-
-        // Do well-known delegation lookup.
-        if let Some(server) = get_well_known(&self.http_client, &host).await {
-            let a = http::uri::Authority::from_str(&server.server)?;
-            host = a.host().to_string();
-            port = a.port_u16();
-            authority = a.to_string();
-
-            debug!("Found .well-known, returned {}", &server.server);
-        } else {
-            debug!("No .well-known found");
         }
 
         // If a literal IP or includes port then we short circuit.
@@ -224,10 +199,7 @@ impl MatrixResolver {
 /// Check if there is a `.well-known` file present on the given host.
 pub async fn get_well_known<C>(http_client: &Client<C>, host: &str) -> Option<WellKnownServer>
 where
-    C: Service<Uri> + Clone + Sync + Send + 'static,
-    C::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    C::Future: Unpin + Send,
-    C::Response: AsyncRead + AsyncWrite + Connection + Unpin + Send + 'static,
+    C: Connect + Clone + Sync + Send + 'static,
 {
     // TODO: Add timeout and cache result
 
@@ -237,6 +209,8 @@ where
         .path_and_query("/.well-known/matrix/server")
         .build()
         .ok()?;
+
+    debug!("Querying well-known: {}", uri);
 
     let mut body = http_client.get(uri).await.ok()?.into_body();
 
@@ -248,6 +222,54 @@ where
     }
 
     serde_json::from_slice(&vec).ok()?
+}
+
+/// Check if the request is pointing at a delegated server, and if so replace
+/// with delegated info.
+pub async fn handle_delegated_server<C>(
+    http_client: &Client<C>,
+    mut req: Request<Body>,
+) -> Result<Request<Body>, Error>
+where
+    C: Connect + Clone + Sync + Send + 'static,
+{
+    debug!("URI: {:?}", req.uri());
+    if req.uri().scheme_str() != Some("matrix") {
+        debug!("Got scheme: {:?}", req.uri().scheme_str());
+        return Ok(req);
+    }
+
+    let host = req.uri().host().context("missing host")?;
+    let port = req.uri().port();
+
+    if host.parse::<IpAddr>().is_ok() || port.is_some() {
+        debug!("Literals");
+    } else {
+        let well_known =
+            get_well_known(http_client, req.uri().host().context("missing host")?).await;
+
+        let host = if let Some(w) = &well_known {
+            debug!("Found well-known: {}", &w.server);
+
+            let a = http::uri::Authority::from_str(&w.server)?;
+            let mut builder = Uri::builder().scheme("matrix").authority(a);
+            if let Some(p) = req.uri().path_and_query() {
+                builder = builder.path_and_query(p.clone());
+            }
+
+            *req.uri_mut() = builder.build()?;
+
+            &w.server
+        } else {
+            debug!("No well-known");
+            req.uri().host().context("missing host")?
+        };
+
+        let host_val = host.parse()?;
+        req.headers_mut().insert(HOST, host_val);
+    }
+
+    Ok(req)
 }
 
 /// A parsed Matrix `.well-known` file.
@@ -295,6 +317,14 @@ impl Service<Uri> for MatrixConnector {
     fn call(&mut self, dst: Uri) -> Self::Future {
         let resolver = self.resolver.clone();
         async move {
+            if dst.scheme_str() != Some("matrix") {
+                let r = HttpsConnector::new().call(dst).await;
+                match r {
+                    Ok(r) => return Ok(r),
+                    Err(e) => return Err(format_err!("{}", e)),
+                }
+            }
+
             let endpoints = resolver
                 .resolve_server_name_from_host_port(
                     dst.host().expect("hostname").to_string(),
@@ -303,6 +333,7 @@ impl Service<Uri> for MatrixConnector {
                 .await?;
 
             for endpoint in endpoints {
+                debug!("Connecting to endpoint {:?}", endpoint);
                 match try_connecting(&dst, &endpoint).await {
                     Ok(r) => {
                         trace!(

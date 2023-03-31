@@ -15,20 +15,33 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use signed_json::{Canonical, Signed};
 
-use crate::server_resolver::MatrixConnector;
+use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
 /// A [`hyper::Client`] that routes `matrix://` URIs correctly, but does not
 /// sign the requests.
 ///
 /// Either use [`SigningFederationClient`] if you want requests to be automatically
 /// signed, or [`sign_and_build_json_request`] to sign the requests.
-pub type FederationClient = hyper::Client<MatrixConnector>;
+#[derive(Debug, Clone)]
+pub struct FederationClient {
+    client: hyper::Client<MatrixConnector>,
+}
+
+impl FederationClient {
+    pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+        req = handle_delegated_server(&self.client, req).await?;
+
+        return Ok(self.client.request(req).await?);
+    }
+}
 
 /// Helper function to build a [`FederationClient`].
 pub async fn new_federation_client() -> Result<FederationClient, Error> {
     let connector = MatrixConnector::with_default_resolver().await?;
 
-    Ok(Client::builder().build(connector))
+    Ok(FederationClient {
+        client: Client::builder().build(connector),
+    })
 }
 
 /// A HTTP client that correctly resolves `matrix://` URIs and signs the
@@ -98,14 +111,16 @@ where
 
         let mut req = Request::new(body);
         *req.uri_mut() = uri;
-        Ok(self.request(req).await?)
+        self.request(req).await
     }
 
     /// Send the request.
     ///
     /// For `matrix://` URIs the request body must be JSON (if not empty) and
     /// the request will be signed.
-    pub async fn request(&self, req: Request<Body>) -> Result<Response<Body>, Error> {
+    pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+        req = handle_delegated_server(&self.client, req).await?;
+
         if req.uri().scheme() != Some(&"matrix".parse()?) {
             return Ok(self.client.request(req).await?);
         }
@@ -169,7 +184,7 @@ pub fn make_auth_header<T: serde::Serialize>(
 
     let signed: Signed<_> = Signed::wrap(request_json).context("Failed to serialize content")?;
     let sig = signed.sign_detached(secret_key);
-    let b64_sig = base64::encode_config(&sig, base64::STANDARD_NO_PAD);
+    let b64_sig = base64::encode_config(sig, base64::STANDARD_NO_PAD);
 
     Ok(format!(
         r#"X-Matrix origin={},key="{}",sig="{}""#,
