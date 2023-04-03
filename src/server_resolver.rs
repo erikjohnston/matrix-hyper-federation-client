@@ -9,7 +9,7 @@ use hyper::client::connect::Connect;
 use hyper::service::Service;
 use hyper::{Body, Client};
 use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
@@ -405,8 +405,8 @@ impl Service<Uri> for MatrixConnector {
                     }
                     // Errors here are not unexpected, and we just move on
                     // with our lives.
-                    Err(e) => debug!(
-                        "Failed to connect to {} via {}:{} because {}",
+                    Err(e) => warn!(
+                        "Failed to connect to {} via {}:{} because {:?}",
                         dst.host().expect("hostname"),
                         endpoint.host,
                         endpoint.port,
@@ -415,7 +415,7 @@ impl Service<Uri> for MatrixConnector {
                 }
             }
 
-            Err(format_err!("help"))
+            Err(format_err!("failed to connect to any endpoint"))
         }
         .boxed()
     }
