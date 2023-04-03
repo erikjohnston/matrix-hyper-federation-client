@@ -28,6 +28,10 @@ pub struct FederationClient {
 }
 
 impl FederationClient {
+    pub fn new(client: hyper::Client<MatrixConnector>) -> Self {
+        FederationClient { client }
+    }
+
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
