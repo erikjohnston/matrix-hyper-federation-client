@@ -146,7 +146,7 @@ impl MatrixResolver {
 
         let result = self
             .resolver
-            .srv_lookup(format!("_matrix._tcp.{}", host).as_ref())
+            .srv_lookup(format!("_matrix._tcp.{}", host))
             .await;
 
         let records = match result {

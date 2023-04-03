@@ -4,6 +4,8 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use anyhow::{bail, format_err, Context, Error};
+use base64::prelude::BASE64_STANDARD_NO_PAD;
+use base64::Engine;
 use ed25519_dalek::Keypair;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
@@ -188,7 +190,7 @@ pub fn make_auth_header<T: serde::Serialize>(
 
     let signed: Signed<_> = Signed::wrap(request_json).context("Failed to serialize content")?;
     let sig = signed.sign_detached(secret_key);
-    let b64_sig = base64::encode_config(sig, base64::STANDARD_NO_PAD);
+    let b64_sig = BASE64_STANDARD_NO_PAD.encode(sig);
 
     Ok(format!(
         r#"X-Matrix origin={},key="{}",sig="{}""#,
