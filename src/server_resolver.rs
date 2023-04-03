@@ -3,7 +3,7 @@
 use anyhow::{bail, format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
-use http::header::HOST;
+use http::header::{HOST, LOCATION};
 use http::{Request, Uri};
 use hyper::client::connect::Connect;
 use hyper::service::Service;
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsConnector as AsyncTlsConnector;
 use trust_dns_resolver::error::ResolveErrorKind;
+use url::Url;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -203,25 +204,53 @@ where
 {
     // TODO: Add timeout and cache result
 
-    let uri = hyper::Uri::builder()
+    let mut uri = hyper::Uri::builder()
         .scheme("https")
         .authority(host)
         .path_and_query("/.well-known/matrix/server")
         .build()
         .ok()?;
 
-    debug!("Querying well-known: {}", uri);
+    for _ in 0..10 {
+        debug!("Querying well-known: {}", uri);
 
-    let mut body = http_client.get(uri).await.ok()?.into_body();
+        let resp = http_client.get(uri.clone()).await.ok()?;
 
-    let mut vec = Vec::new();
-    while let Some(next) = body.next().await {
-        // TODO: Limit size of body.
-        let chunk = next.ok()?;
-        vec.extend(chunk);
+        debug!("Got well-known response: {}", resp.status().as_u16());
+
+        if resp.status().is_redirection() {
+            if let Some(loc) = resp.headers().get(LOCATION) {
+                let location = loc.to_str().ok()?;
+                debug!("Got location header: {location}");
+
+                let mut url = Url::parse(&uri.to_string()).ok()?;
+                url = url.join(location).ok()?;
+                uri = hyper::Uri::from_str(url.as_str()).ok()?;
+
+                debug!("New uri: {uri}");
+
+                continue;
+            } else {
+                debug!("Got 3xx status with no location header");
+                return None;
+            };
+        }
+
+        let mut body = resp.into_body();
+
+        let mut vec = Vec::new();
+        while let Some(next) = body.next().await {
+            // TODO: Limit size of body.
+            let chunk = next.ok()?;
+            vec.extend(chunk);
+        }
+
+        return serde_json::from_slice(&vec).ok();
     }
 
-    serde_json::from_slice(&vec).ok()?
+    debug!("Redirection loop exhausted");
+
+    None
 }
 
 /// Check if the request is pointing at a delegated server, and if so replace

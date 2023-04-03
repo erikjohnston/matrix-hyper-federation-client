@@ -24,3 +24,4 @@ signed-json = { git = "https://github.com/erikjohnston/rust-signed-json.git" }
 tokio = { version = "1.12.0", features = ["macros"] }
 tokio-native-tls = "0.3.0"
 trust-dns-resolver = "0.20.3"
+url = "2.3.1"
