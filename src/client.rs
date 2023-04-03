@@ -24,7 +24,7 @@ use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 /// signed, or [`sign_and_build_json_request`] to sign the requests.
 #[derive(Debug, Clone)]
 pub struct FederationClient {
-    client: hyper::Client<MatrixConnector>,
+    pub client: hyper::Client<MatrixConnector>,
 }
 
 impl FederationClient {

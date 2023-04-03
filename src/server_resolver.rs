@@ -1,6 +1,6 @@
 //! Module for resolving Matrix server names.
 
-use anyhow::{bail, format_err, Context, Error};
+use anyhow::{format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
 use http::header::{HOST, LOCATION};
@@ -8,12 +8,11 @@ use http::{Request, Uri};
 use hyper::client::connect::Connect;
 use hyper::service::Service;
 use hyper::{Body, Client};
-use hyper_tls::{HttpsConnector, MaybeHttpsStream};
+use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
 use log::{debug, trace};
-use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
-use tokio_native_tls::TlsConnector as AsyncTlsConnector;
+use tokio_rustls::rustls::ClientConfig;
 use trust_dns_resolver::error::ResolveErrorKind;
 use url::Url;
 
@@ -314,19 +313,28 @@ pub struct WellKnownServer {
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
+    client_config: ClientConfig,
 }
 
 impl MatrixConnector {
     /// Create new [`MatrixConnector`] with the given [`MatrixResolver`].
     pub fn with_resolver(resolver: MatrixResolver) -> MatrixConnector {
-        MatrixConnector { resolver }
+        let client_config = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        MatrixConnector {
+            resolver,
+            client_config,
+        }
     }
 
     /// Create new [`MatrixConnector`] with a default [`MatrixResolver`].
     pub async fn with_default_resolver() -> Result<MatrixConnector, Error> {
         let resolver = MatrixResolver::new().await?;
 
-        Ok(MatrixConnector { resolver })
+        Ok(MatrixConnector::with_resolver(resolver))
     }
 }
 
@@ -345,13 +353,22 @@ impl Service<Uri> for MatrixConnector {
 
     fn call(&mut self, dst: Uri) -> Self::Future {
         let resolver = self.resolver.clone();
+        let client_config = self.client_config.clone();
+
         async move {
             if dst.scheme_str() != Some("matrix") {
-                let r = HttpsConnector::new().call(dst).await;
-                match r {
-                    Ok(r) => return Ok(r),
-                    Err(e) => return Err(format_err!("{}", e)),
-                }
+                let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                    .with_tls_config(client_config)
+                    .https_only()
+                    .enable_http1()
+                    .build();
+
+                let r = https.call(dst).await;
+
+                return match r {
+                    Ok(r) => Ok(r),
+                    Err(e) => Err(format_err!("{}", e)),
+                };
             }
 
             let endpoints = resolver
@@ -363,7 +380,21 @@ impl Service<Uri> for MatrixConnector {
 
             for endpoint in endpoints {
                 debug!("Connecting to endpoint {:?}", endpoint);
-                match try_connecting(&dst, &endpoint).await {
+
+                let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                    .with_tls_config(client_config.clone())
+                    .https_only()
+                    .with_server_name(endpoint.tls_name.clone())
+                    .enable_http1()
+                    .build();
+
+                let new_dst = Uri::builder()
+                    .authority(format!("{}:{}", endpoint.host, endpoint.port))
+                    .scheme("https")
+                    .path_and_query("/")
+                    .build()?;
+
+                match https.call(new_dst).await {
                     Ok(r) => {
                         trace!(
                             "Connected to host={} port={}",
@@ -388,34 +419,6 @@ impl Service<Uri> for MatrixConnector {
         }
         .boxed()
     }
-}
-
-/// Attempts to connect to a particular endpoint.
-async fn try_connecting(
-    dst: &Uri,
-    endpoint: &Endpoint,
-) -> Result<MaybeHttpsStream<TcpStream>, Error> {
-    let tcp = TcpStream::connect((&endpoint.host as &str, endpoint.port)).await?;
-
-    match dst.scheme_str() {
-        Some("http") => return Ok(tcp.into()),
-        Some("https" | "matrix") => {}
-        Some(s) => bail!("Unknown scheme '{}'", s),
-        None => bail!("URL missing scheme"),
-    }
-
-    let connector: AsyncTlsConnector = if dst.host().expect("hostname").contains("localhost") {
-        TlsConnector::builder()
-            .danger_accept_invalid_certs(true)
-            .build()?
-            .into()
-    } else {
-        TlsConnector::new().unwrap().into()
-    };
-
-    let tls = connector.connect(&endpoint.tls_name, tcp).await?;
-
-    Ok(tls.into())
 }
 
 #[cfg(test)]
