@@ -131,7 +131,7 @@ where
         Ok(Ok(result)) => result,
         Ok(Err(e)) | Err(e) => {
             cache.insert(host.into(), None, WELL_KNOWN_INVALID_CACHE_PERIOD);
-            println!("Error getting well-known {e:?}");
+            debug!("Error getting well-known {e:?}");
             None
         }
     }
