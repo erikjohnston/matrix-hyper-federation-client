@@ -198,12 +198,15 @@ where
             vec.extend(chunk);
         }
 
-        let result = serde_json::from_slice(&vec)?;
+        let result: WellKnownServer = serde_json::from_slice(&vec)?;
 
-        // TODO
-        cache.insert(host.into(), None, WELL_KNOWN_DEFAULT_CACHE_PERIOD);
+        cache.insert(
+            host.into(),
+            Some(result.clone()),
+            WELL_KNOWN_DEFAULT_CACHE_PERIOD,
+        );
 
-        return Ok(result);
+        return Ok(Some(result));
     }
 
     debug!("Redirection loop exhausted");
