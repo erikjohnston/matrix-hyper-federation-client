@@ -1,27 +1,20 @@
 //! Module for resolving Matrix server names.
 
-use anyhow::{format_err, Context, Error};
-use futures::FutureExt;
-use futures_util::stream::StreamExt;
-use http::header::{HOST, LOCATION};
-use http::{Request, Uri};
-use hyper::client::connect::Connect;
-use hyper::service::Service;
-use hyper::{Body, Client};
-use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
-use log::{debug, trace, warn};
-use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio_rustls::rustls::ClientConfig;
-use trust_dns_resolver::error::ResolveErrorKind;
-use url::Url;
-
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::task::{self, Poll};
+
+use anyhow::{format_err, Error};
+use futures::FutureExt;
+use http::Uri;
+use hyper::service::Service;
+use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
+use log::{debug, trace, warn};
+use tokio::net::TcpStream;
+use tokio_rustls::rustls::ClientConfig;
+use trust_dns_resolver::error::ResolveErrorKind;
 
 /// A resolved host for a Matrix server.
 #[derive(Debug, Clone)]
@@ -196,118 +189,6 @@ impl MatrixResolver {
     }
 }
 
-/// Check if there is a `.well-known` file present on the given host.
-pub async fn get_well_known<C>(http_client: &Client<C>, host: &str) -> Option<WellKnownServer>
-where
-    C: Connect + Clone + Sync + Send + 'static,
-{
-    // TODO: Add timeout and cache result
-
-    let mut uri = hyper::Uri::builder()
-        .scheme("https")
-        .authority(host)
-        .path_and_query("/.well-known/matrix/server")
-        .build()
-        .ok()?;
-
-    for _ in 0..10 {
-        debug!("Querying well-known: {}", uri);
-
-        let resp = http_client.get(uri.clone()).await.ok()?;
-
-        debug!("Got well-known response: {}", resp.status().as_u16());
-
-        if resp.status().is_redirection() {
-            if let Some(loc) = resp.headers().get(LOCATION) {
-                let location = loc.to_str().ok()?;
-                debug!("Got location header: {location}");
-
-                let mut url = Url::parse(&uri.to_string()).ok()?;
-                url = url.join(location).ok()?;
-                uri = hyper::Uri::from_str(url.as_str()).ok()?;
-
-                debug!("New uri: {uri}");
-
-                continue;
-            } else {
-                debug!("Got 3xx status with no location header");
-                return None;
-            };
-        }
-
-        let mut body = resp.into_body();
-
-        let mut vec = Vec::new();
-        while let Some(next) = body.next().await {
-            // TODO: Limit size of body.
-            let chunk = next.ok()?;
-            vec.extend(chunk);
-        }
-
-        return serde_json::from_slice(&vec).ok();
-    }
-
-    debug!("Redirection loop exhausted");
-
-    None
-}
-
-/// Check if the request is pointing at a delegated server, and if so replace
-/// with delegated info.
-pub async fn handle_delegated_server<C>(
-    http_client: &Client<C>,
-    mut req: Request<Body>,
-) -> Result<Request<Body>, Error>
-where
-    C: Connect + Clone + Sync + Send + 'static,
-{
-    debug!("URI: {:?}", req.uri());
-    if req.uri().scheme_str() != Some("matrix") {
-        debug!("Got scheme: {:?}", req.uri().scheme_str());
-        return Ok(req);
-    }
-
-    let host = req.uri().host().context("missing host")?;
-    let port = req.uri().port();
-
-    if host.parse::<IpAddr>().is_ok() || port.is_some() {
-        debug!("Literals");
-    } else {
-        let well_known =
-            get_well_known(http_client, req.uri().host().context("missing host")?).await;
-
-        let host = if let Some(w) = &well_known {
-            debug!("Found well-known: {}", &w.server);
-
-            let a = http::uri::Authority::from_str(&w.server)?;
-            let mut builder = Uri::builder().scheme("matrix").authority(a);
-            if let Some(p) = req.uri().path_and_query() {
-                builder = builder.path_and_query(p.clone());
-            }
-
-            *req.uri_mut() = builder.build()?;
-
-            &w.server
-        } else {
-            debug!("No well-known");
-            req.uri().host().context("missing host")?
-        };
-
-        let host_val = host.parse()?;
-        req.headers_mut().insert(HOST, host_val);
-    }
-
-    Ok(req)
-}
-
-/// A parsed Matrix `.well-known` file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct WellKnownServer {
-    #[serde(rename = "m.server")]
-    pub server: String,
-}
-
 /// A connector that can be used with a [`hyper::Client`] that correctly
 /// resolves and connects to `matrix://` URIs.
 #[derive(Debug, Clone)]
@@ -423,13 +304,6 @@ impl Service<Uri> for MatrixConnector {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Error;
-    use futures::FutureExt;
-    use http::Uri;
-    use hyper::client::connect::Connected;
-    use hyper::client::connect::Connection;
-    use hyper::server::conn::Http;
-    use hyper::service::Service;
     use std::future::Future;
     use std::pin::Pin;
     use std::{
@@ -437,6 +311,14 @@ mod test {
         sync::{Arc, Mutex},
         task::{self, Poll},
     };
+
+    use anyhow::Error;
+    use futures::FutureExt;
+    use http::Uri;
+    use hyper::client::connect::Connected;
+    use hyper::client::connect::Connection;
+    use hyper::server::conn::Http;
+    use hyper::service::Service;
     use tokio::io::{AsyncRead, AsyncWrite};
 
     type TestConnectorFuture = Pin<Box<dyn Future<Output = Result<TestConnection, Error>> + Send>>;

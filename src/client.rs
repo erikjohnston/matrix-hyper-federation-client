@@ -17,7 +17,8 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use signed_json::{Canonical, Signed};
 
-use crate::server_resolver::{handle_delegated_server, MatrixConnector};
+use crate::server_resolver::MatrixConnector;
+use crate::well_known::{handle_delegated_server, WellKnownCache};
 
 /// A [`hyper::Client`] that routes `matrix://` URIs correctly, but does not
 /// sign the requests.
@@ -27,15 +28,20 @@ use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 #[derive(Debug, Clone)]
 pub struct FederationClient {
     pub client: hyper::Client<MatrixConnector>,
+    pub well_known_cache: WellKnownCache,
 }
 
 impl FederationClient {
     pub fn new(client: hyper::Client<MatrixConnector>) -> Self {
-        FederationClient { client }
+        let well_known_cache = WellKnownCache::new();
+        FederationClient {
+            client,
+            well_known_cache,
+        }
     }
 
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
-        req = handle_delegated_server(&self.client, req).await?;
+        req = handle_delegated_server(&self.client, &self.well_known_cache, req).await?;
 
         return Ok(self.client.request(req).await?);
     }
@@ -47,6 +53,7 @@ pub async fn new_federation_client() -> Result<FederationClient, Error> {
 
     Ok(FederationClient {
         client: Client::builder().build(connector),
+        well_known_cache: WellKnownCache::new(),
     })
 }
 
@@ -65,6 +72,7 @@ pub struct SigningFederationClient<C = MatrixConnector> {
     server_name: String,
     key_id: String,
     secret_key: Arc<Keypair>,
+    well_known_cache: WellKnownCache,
 }
 
 impl SigningFederationClient<MatrixConnector> {
@@ -81,6 +89,7 @@ impl SigningFederationClient<MatrixConnector> {
             server_name: server_name.to_string(),
             key_id: key_id.to_string(),
             secret_key: Arc::new(secret_key),
+            well_known_cache: WellKnownCache::new(),
         })
     }
 }
@@ -101,6 +110,7 @@ impl<C> SigningFederationClient<C> {
             server_name,
             key_id: key_name,
             secret_key: Arc::new(secret_key),
+            well_known_cache: WellKnownCache::new(),
         }
     }
 }
@@ -125,7 +135,7 @@ where
     /// For `matrix://` URIs the request body must be JSON (if not empty) and
     /// the request will be signed.
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
-        req = handle_delegated_server(&self.client, req).await?;
+        req = handle_delegated_server(&self.client, &self.well_known_cache, req).await?;
 
         if req.uri().scheme() != Some(&"matrix".parse()?) {
             return Ok(self.client.request(req).await?);

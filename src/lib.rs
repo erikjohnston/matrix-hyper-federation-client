@@ -56,6 +56,7 @@
 
 pub mod client;
 pub mod server_resolver;
+pub mod well_known;
 
 #[doc(inline)]
 pub use client::{FederationClient, SignedRequestBuilderExt, SigningFederationClient};
