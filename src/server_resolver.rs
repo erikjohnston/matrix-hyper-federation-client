@@ -240,7 +240,7 @@ impl Service<Uri> for MatrixConnector {
             if dst.scheme_str() != Some("matrix") {
                 let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config)
-                    .https_only()
+                    .https_or_http()
                     .enable_http1()
                     .build();
 

@@ -126,10 +126,12 @@ where
         get_well_known_inner(http_client, cache, host),
     )
     .await
+    .context("timeout")
     {
         Ok(Ok(result)) => result,
-        _ => {
+        Ok(Err(e)) | Err(e) => {
             cache.insert(host.into(), None, WELL_KNOWN_INVALID_CACHE_PERIOD);
+            println!("Error getting well-known {e:?}");
             None
         }
     }
