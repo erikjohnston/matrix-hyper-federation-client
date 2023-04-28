@@ -20,7 +20,7 @@ use signed_json::{Canonical, Signed};
 use crate::server_resolver::MatrixConnector;
 use crate::well_known::{handle_delegated_server, WellKnownCache};
 
-/// A [`hyper::Client`] that routes `matrix://` URIs correctly, but does not
+/// A [`hyper::Client`] that routes `matrix-federation://` URIs correctly, but does not
 /// sign the requests.
 ///
 /// Either use [`SigningFederationClient`] if you want requests to be automatically
@@ -57,10 +57,10 @@ pub async fn new_federation_client() -> Result<FederationClient, Error> {
     })
 }
 
-/// A HTTP client that correctly resolves `matrix://` URIs and signs the
+/// A HTTP client that correctly resolves `matrix-federation://` URIs and signs the
 /// requests.
 ///
-/// This will fail for requests to a `matrix://` URI that have a non-JSON body.
+/// This will fail for requests to a `matrix-federation://` URI that have a non-JSON body.
 ///
 /// **Note**: Using this is less efficient than using a [`Client`] with a
 /// [`MatrixConnector`] and manually signing the requests, as the implementation
@@ -97,7 +97,7 @@ impl SigningFederationClient<MatrixConnector> {
 impl<C> SigningFederationClient<C> {
     /// Create a new [`SigningFederationClient`] using the given [`Client`].
     ///
-    /// Note, the connector used by the [`Client`] must support `matrix://`
+    /// Note, the connector used by the [`Client`] must support `matrix-federation://`
     /// URIs.
     pub fn with_client(
         client: Client<C>,
@@ -121,7 +121,7 @@ where
 {
     /// Make a GET request to the given URI.
     ///
-    /// Will sign the request if the URI has a `matrix` scheme.
+    /// Will sign the request if the URI has a `matrix-federation` scheme.
     pub async fn get(&self, uri: Uri) -> Result<Response<Body>, Error> {
         let body = Body::default();
 
@@ -132,12 +132,12 @@ where
 
     /// Send the request.
     ///
-    /// For `matrix://` URIs the request body must be JSON (if not empty) and
+    /// For `matrix-federation://` URIs the request body must be JSON (if not empty) and
     /// the request will be signed.
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, &self.well_known_cache, req).await?;
 
-        if req.uri().scheme() != Some(&"matrix".parse()?) {
+        if req.uri().scheme() != Some(&"matrix-federation".parse()?) {
             return Ok(self.client.request(req).await?);
         }
         if !req.body().is_end_stream()

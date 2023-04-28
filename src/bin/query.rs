@@ -34,7 +34,7 @@ async fn main() -> Result<(), Error> {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("matrix://{host}/_matrix/key/v2/server"))
+        .uri(format!("matrix-federation://{host}/_matrix/key/v2/server"))
         .body(Body::empty())?;
 
     let resp = fed_client.request(req).await?;

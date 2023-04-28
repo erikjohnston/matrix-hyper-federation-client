@@ -190,7 +190,7 @@ impl MatrixResolver {
 }
 
 /// A connector that can be used with a [`hyper::Client`] that correctly
-/// resolves and connects to `matrix://` URIs.
+/// resolves and connects to `matrix-federation://` URIs.
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
@@ -237,7 +237,7 @@ impl Service<Uri> for MatrixConnector {
         let client_config = self.client_config.clone();
 
         async move {
-            if dst.scheme_str() != Some("matrix") {
+            if dst.scheme_str() != Some("matrix-federation") {
                 let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config)
                     .https_or_http()

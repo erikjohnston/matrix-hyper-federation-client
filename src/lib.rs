@@ -2,7 +2,7 @@
 //!
 //! # [`SigningFederationClient`]
 //!
-//! The [`SigningFederationClient`] correctly routes `matrix://` URIs and
+//! The [`SigningFederationClient`] correctly routes `matrix-federation://` URIs and
 //! automatically signs such requests:
 //!
 //! ```no_run
@@ -13,7 +13,7 @@
 //! #
 //! let client = SigningFederationClient::new("local_server", "ed25519:sg5Sa", secret_key).await?;
 //!
-//! let uri = "matrix://matrix.org/_matrix/federation/v1/version".parse()?;
+//! let uri = "matrix-federation://matrix.org/_matrix/federation/v1/version".parse()?;
 //! let resp = client.get(uri).await?;
 //!
 //! assert_eq!(resp.status(), 200);
@@ -28,7 +28,7 @@
 //! # [`FederationClient`]
 //!
 //! The [`FederationClient`] is just a standard [`hyper::Client`] with a
-//! [`MatrixConnector`] that can route `matrix://` URIs, but does *not* sign the
+//! [`MatrixConnector`] that can route `matrix-federation://` URIs, but does *not* sign the
 //! requests automatically:
 //!
 //! ```no_run
@@ -43,7 +43,7 @@
 //!
 //! let request = Request::builder()
 //!     .method("GET")
-//!     .uri("matrix://matrix.org/_matrix/federation/v1/version")
+//!     .uri("matrix-federation://matrix.org/_matrix/federation/v1/version")
 //!     .signed("localhost", "ed25519:sg5Sa", &secret_key)?;
 //!
 //! let resp = client.request(request).await?;
