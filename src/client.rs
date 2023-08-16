@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{bail, format_err, Context, Error};
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
-use ed25519_dalek::Keypair;
+use ed25519_dalek::SigningKey;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
 use http::{HeaderValue, Uri};
@@ -37,7 +37,7 @@ impl FederationClient {
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        return Ok(self.client.request(req).await?);
+        Ok(self.client.request(req).await?)
     }
 }
 
@@ -64,7 +64,7 @@ pub struct SigningFederationClient<C = MatrixConnector> {
     client: Client<C>,
     server_name: String,
     key_id: String,
-    secret_key: Arc<Keypair>,
+    secret_key: Arc<SigningKey>,
 }
 
 impl SigningFederationClient<MatrixConnector> {
@@ -72,7 +72,7 @@ impl SigningFederationClient<MatrixConnector> {
     pub async fn new(
         server_name: impl ToString,
         key_id: impl ToString,
-        secret_key: Keypair,
+        secret_key: SigningKey,
     ) -> Result<Self, Error> {
         let connector = MatrixConnector::with_default_resolver().await?;
 
@@ -94,7 +94,7 @@ impl<C> SigningFederationClient<C> {
         client: Client<C>,
         server_name: String,
         key_name: String,
-        secret_key: Keypair,
+        secret_key: SigningKey,
     ) -> Self {
         SigningFederationClient {
             client,
@@ -174,7 +174,7 @@ where
 pub fn make_auth_header<T: serde::Serialize>(
     server_name: &str,
     key_id: &str,
-    secret_key: &Keypair,
+    secret_key: &SigningKey,
     method: &str,
     path: &str,
     destination: &str,
@@ -190,7 +190,7 @@ pub fn make_auth_header<T: serde::Serialize>(
 
     let signed: Signed<_> = Signed::wrap(request_json).context("Failed to serialize content")?;
     let sig = signed.sign_detached(secret_key);
-    let b64_sig = BASE64_STANDARD_NO_PAD.encode(sig);
+    let b64_sig = BASE64_STANDARD_NO_PAD.encode(sig.to_bytes());
 
     Ok(format!(
         r#"X-Matrix origin={},key="{}",sig="{}""#,
@@ -202,7 +202,7 @@ pub fn make_auth_header<T: serde::Serialize>(
 pub fn make_auth_header_from_parts<T: serde::Serialize>(
     server_name: &str,
     key_id: &str,
-    secret_key: &Keypair,
+    secret_key: &SigningKey,
     parts: &Parts,
     content: Option<T>,
 ) -> Result<String, Error> {
@@ -228,7 +228,7 @@ pub fn make_auth_header_from_parts<T: serde::Serialize>(
 pub fn sign_and_build_json_request<T: serde::Serialize>(
     server_name: &str,
     key_id: &str,
-    secret_key: &Keypair,
+    secret_key: &SigningKey,
     mut request_builder: Builder,
     content: Option<T>,
 ) -> Result<Request<Body>, Error> {
@@ -302,7 +302,7 @@ pub trait SignedRequestBuilderExt {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
     ) -> Result<Request<Body>, Error>;
 
     /// Sign and build the request with the given JSON body.
@@ -310,7 +310,7 @@ pub trait SignedRequestBuilderExt {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
         content: T,
     ) -> Result<Request<Body>, Error>;
 
@@ -319,7 +319,7 @@ pub trait SignedRequestBuilderExt {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
         content: Option<T>,
     ) -> Result<Request<Body>, Error>;
 }
@@ -329,7 +329,7 @@ impl SignedRequestBuilderExt for Builder {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
     ) -> Result<Request<Body>, Error> {
         sign_and_build_json_request::<()>(server_name, key_id, secret_key, self, None)
     }
@@ -338,7 +338,7 @@ impl SignedRequestBuilderExt for Builder {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
         content: T,
     ) -> Result<Request<Body>, Error> {
         sign_and_build_json_request(server_name, key_id, secret_key, self, Some(content))
@@ -348,7 +348,7 @@ impl SignedRequestBuilderExt for Builder {
         self,
         server_name: &str,
         key_id: &str,
-        secret_key: &Keypair,
+        secret_key: &SigningKey,
         content: Option<T>,
     ) -> Result<Request<Body>, Error> {
         if let Some(content) = content {
@@ -402,8 +402,6 @@ pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
 mod test {
     use std::collections::BTreeMap;
 
-    use ed25519_dalek::{PublicKey, SecretKey};
-
     use super::*;
 
     #[test]
@@ -419,10 +417,7 @@ mod test {
 
     #[tokio::test]
     async fn auth_header_no_content() {
-        let secret = SecretKey::from_bytes(&[0u8; 32]).unwrap();
-        let public = PublicKey::from(&secret);
-
-        let secret_key = Keypair { secret, public };
+        let secret_key = SigningKey::from_bytes(&[0u8; 32]);
 
         let header = make_auth_header::<()>(
             "localhost",
@@ -443,10 +438,7 @@ mod test {
 
     #[tokio::test]
     async fn auth_header_content() {
-        let secret = SecretKey::from_bytes(&[0u8; 32]).unwrap();
-        let public = PublicKey::from(&secret);
-
-        let secret_key = Keypair { secret, public };
+        let secret_key = SigningKey::from_bytes(&[0u8; 32]);
 
         let mut map = BTreeMap::new();
         map.insert("foo", "bar");

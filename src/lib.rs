@@ -6,10 +6,10 @@
 //! automatically signs such requests:
 //!
 //! ```no_run
-//! # use ed25519_dalek::Keypair;
+//! # use ed25519_dalek::SigningKey;
 //! # use matrix_hyper_federation_client::SigningFederationClient;
 //! #
-//! # async fn run(secret_key: Keypair) -> Result<(), anyhow::Error> {
+//! # async fn run(secret_key: SigningKey) -> Result<(), anyhow::Error> {
 //! #
 //! let client = SigningFederationClient::new("local_server", "ed25519:sg5Sa", secret_key).await?;
 //!
@@ -35,9 +35,9 @@
 //! # use matrix_hyper_federation_client::client::{new_federation_client, sign_and_build_json_request};
 //! # use hyper::Request;
 //! use matrix_hyper_federation_client::SignedRequestBuilderExt;
-//! # use ed25519_dalek::Keypair;
+//! # use ed25519_dalek::SigningKey;
 //! #
-//! # async fn run(secret_key: &Keypair) -> Result<(), anyhow::Error> {
+//! # async fn run(secret_key: &SigningKey) -> Result<(), anyhow::Error> {
 //! #
 //! let client = new_federation_client().await?;
 //!
