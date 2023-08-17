@@ -193,8 +193,8 @@ pub fn make_auth_header<T: serde::Serialize>(
     let b64_sig = BASE64_STANDARD_NO_PAD.encode(sig.to_bytes());
 
     Ok(format!(
-        r#"X-Matrix origin={},key="{}",sig="{}""#,
-        server_name, key_id, b64_sig,
+        r#"X-Matrix origin={},destination="{}",key="{}",sig="{}""#,
+        server_name, destination, key_id, b64_sig,
     ))
 }
 
@@ -362,6 +362,7 @@ impl SignedRequestBuilderExt for Builder {
 /// A parsed Matrix `Authorization` header.
 pub struct AuthHeader<'a> {
     pub origin: &'a str,
+    pub destination: Option<&'a str>,
     pub key_id: &'a str,
     pub signature: &'a str,
 }
@@ -370,6 +371,7 @@ pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
     let header = header.strip_prefix("X-Matrix ")?;
 
     let mut origin = None;
+    let mut destination = None;
     let mut key_id = None;
     let mut signature = None;
     for item in header.split(',') {
@@ -385,6 +387,7 @@ pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
 
         match key {
             "origin" => origin = Some(value),
+            "destination" => destination = Some(value),
             "key" => key_id = Some(value),
             "sig" => signature = Some(value),
             _ => {}
@@ -393,6 +396,7 @@ pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
 
     Some(AuthHeader {
         origin: origin?,
+        destination,
         key_id: key_id?,
         signature: signature?,
     })
@@ -406,11 +410,28 @@ mod test {
 
     #[test]
     fn test_parse_auth_header() {
+        let header = parse_auth_header(
+            r#"X-Matrix origin=foo.com,destination=baz.com,key="key_id",sig="some_signature""#,
+        )
+        .unwrap();
+
+        assert_eq!(header.origin, "foo.com");
+        assert_eq!(header.destination, Some("baz.com"));
+        assert_eq!(header.key_id, "key_id");
+        assert_eq!(header.signature, "some_signature");
+    }
+
+    /// The "destination" parameter of an X-Matrix scheme Authorization header was added in Matrix v1.3,
+    /// therefore some implementations may not include it.
+    /// https://spec.matrix.org/v1.3/server-server-api/#request-authentication.
+    #[test]
+    fn test_parse_auth_header_no_destination() {
         let header =
             parse_auth_header(r#"X-Matrix origin=foo.com,key="key_id",sig="some_signature""#)
                 .unwrap();
 
         assert_eq!(header.origin, "foo.com");
+        assert_eq!(header.destination, None);
         assert_eq!(header.key_id, "key_id");
         assert_eq!(header.signature, "some_signature");
     }
@@ -432,7 +453,7 @@ mod test {
 
         assert_eq!(
             header,
-            r#"X-Matrix origin=localhost,key="ed25519:test",sig="aemgn56SKst12mSbh2X0l3pBuzyWmAkURVknrTqz/ev2p8KDnKHXnFw/UsLOfwbD6V/om4Lh+DzeyE0MlJ1GBA""#
+            r#"X-Matrix origin=localhost,destination="matrix.org",key="ed25519:test",sig="aemgn56SKst12mSbh2X0l3pBuzyWmAkURVknrTqz/ev2p8KDnKHXnFw/UsLOfwbD6V/om4Lh+DzeyE0MlJ1GBA""#
         );
     }
 
@@ -456,7 +477,7 @@ mod test {
 
         assert_eq!(
             header,
-            r#"X-Matrix origin=localhost,key="ed25519:test",sig="JwOvw9q9rGU1FOX+nVqZkXL9P6WhsKE3aNV2Q+Ftj0urJHv8olv7r7gOMZM3nITm0gVwYBN8s0FBGJymeQt9DA""#
+            r#"X-Matrix origin=localhost,destination="matrix.org",key="ed25519:test",sig="JwOvw9q9rGU1FOX+nVqZkXL9P6WhsKE3aNV2Q+Ftj0urJHv8olv7r7gOMZM3nITm0gVwYBN8s0FBGJymeQt9DA""#
         );
     }
 }
