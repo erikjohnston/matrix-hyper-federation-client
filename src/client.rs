@@ -396,7 +396,7 @@ pub fn parse_auth_header(header: &str) -> Option<AuthHeader> {
 
     Some(AuthHeader {
         origin: origin?,
-        destination: destination,
+        destination,
         key_id: key_id?,
         signature: signature?,
     })
