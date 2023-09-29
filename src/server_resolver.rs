@@ -298,7 +298,7 @@ pub struct WellKnownServer {
 }
 
 /// A connector that can be used with a [`hyper::Client`] that correctly
-/// resolves and connects to `matrix://` URIs.
+/// resolves and connects to `matrix-federation://` URIs.
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
