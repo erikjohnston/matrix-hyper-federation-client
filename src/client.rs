@@ -42,8 +42,8 @@ impl FederationClient {
 }
 
 /// Helper function to build a [`FederationClient`].
-pub async fn new_federation_client() -> Result<FederationClient, Error> {
-    let connector = MatrixConnector::with_default_resolver().await?;
+pub fn new_federation_client() -> Result<FederationClient, Error> {
+    let connector = MatrixConnector::with_default_resolver()?;
 
     Ok(FederationClient {
         client: Client::builder().build(connector),
@@ -69,12 +69,12 @@ pub struct SigningFederationClient<C = MatrixConnector> {
 
 impl SigningFederationClient<MatrixConnector> {
     /// Create a new client with the default resolver.
-    pub async fn new(
+    pub fn new(
         server_name: impl ToString,
         key_id: impl ToString,
         secret_key: SigningKey,
     ) -> Result<Self, Error> {
-        let connector = MatrixConnector::with_default_resolver().await?;
+        let connector = MatrixConnector::with_default_resolver()?;
 
         Ok(SigningFederationClient {
             client: Client::builder().build(connector),

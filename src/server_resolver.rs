@@ -53,7 +53,7 @@ pub struct MatrixResolver {
 
 impl MatrixResolver {
     /// Create a new [`MatrixResolver`]
-    pub async fn new() -> Result<MatrixResolver, Error> {
+    pub fn new() -> Result<MatrixResolver, Error> {
         let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
 
         Ok(MatrixResolver { resolver })
@@ -320,8 +320,8 @@ impl MatrixConnector {
     }
 
     /// Create new [`MatrixConnector`] with a default [`MatrixResolver`].
-    pub async fn with_default_resolver() -> Result<MatrixConnector, Error> {
-        let resolver = MatrixResolver::new().await?;
+    pub fn with_default_resolver() -> Result<MatrixConnector, Error> {
+        let resolver = MatrixResolver::new()?;
 
         Ok(MatrixConnector::with_resolver(resolver))
     }
