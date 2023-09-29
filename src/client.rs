@@ -34,20 +34,20 @@ impl FederationClient {
         FederationClient { client }
     }
 
+    /// Helper function to build a [`FederationClient`].
+    pub fn new_with_default_resolver() -> Result<FederationClient, Error> {
+        let connector = MatrixConnector::with_default_resolver()?;
+
+        Ok(FederationClient {
+            client: Client::builder().build(connector),
+        })
+    }
+
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
         Ok(self.client.request(req).await?)
     }
-}
-
-/// Helper function to build a [`FederationClient`].
-pub fn new_federation_client() -> Result<FederationClient, Error> {
-    let connector = MatrixConnector::with_default_resolver()?;
-
-    Ok(FederationClient {
-        client: Client::builder().build(connector),
-    })
 }
 
 /// A HTTP client that correctly resolves `matrix://` URIs and signs the
