@@ -251,7 +251,7 @@ where
     C: Connect + Clone + Sync + Send + 'static,
 {
     debug!("URI: {:?}", req.uri());
-    if req.uri().scheme_str() != Some("matrix") {
+    if req.uri().scheme_str() != Some("matrix-federation") {
         debug!("Got scheme: {:?}", req.uri().scheme_str());
         return Ok(req);
     }
@@ -269,7 +269,7 @@ where
             debug!("Found well-known: {}", &w.server);
 
             let a = http::uri::Authority::from_str(&w.server)?;
-            let mut builder = Uri::builder().scheme("matrix").authority(a);
+            let mut builder = Uri::builder().scheme("matrix-federation").authority(a);
             if let Some(p) = req.uri().path_and_query() {
                 builder = builder.path_and_query(p.clone());
             }
@@ -345,7 +345,7 @@ impl Service<Uri> for MatrixConnector {
         let client_config = self.client_config.clone();
 
         async move {
-            if dst.scheme_str() != Some("matrix") {
+            if dst.scheme_str() != Some("matrix-federation") {
                 let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config)
                     .https_only()

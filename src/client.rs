@@ -127,7 +127,7 @@ where
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        if req.uri().scheme() != Some(&"matrix".parse()?) {
+        if req.uri().scheme() != Some(&"matrix-federation".parse()?) {
             return Ok(self.client.request(req).await?);
         }
         if !req.body().is_end_stream()
