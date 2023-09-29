@@ -120,17 +120,6 @@ impl MatrixResolver {
             host.to_string()
         };
 
-        // If a literal IP or includes port then we shortcircuit.
-        if host.parse::<IpAddr>().is_ok() || port.is_some() {
-            return Ok(vec![Endpoint {
-                host: host.to_string(),
-                port: port.unwrap_or(8448),
-
-                host_header: authority.to_string(),
-                tls_name: host.to_string(),
-            }]);
-        }
-
         // If a literal IP or includes port then we short circuit.
         if host.parse::<IpAddr>().is_ok() || port.is_some() {
             debug!("Host is IP or port is set");
