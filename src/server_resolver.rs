@@ -1,5 +1,12 @@
 //! Module for resolving Matrix server names.
 
+use std::collections::BTreeMap;
+use std::future::Future;
+use std::net::IpAddr;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::{self, Poll};
+
 use anyhow::{format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
@@ -15,13 +22,6 @@ use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
 use trust_dns_resolver::error::ResolveErrorKind;
 use url::Url;
-
-use std::collections::BTreeMap;
-use std::future::Future;
-use std::net::IpAddr;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::task::{self, Poll};
 
 /// A resolved host for a Matrix server.
 #[derive(Debug, Clone)]
@@ -423,13 +423,6 @@ impl Service<Uri> for MatrixConnector {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Error;
-    use futures::FutureExt;
-    use http::Uri;
-    use hyper::client::connect::Connected;
-    use hyper::client::connect::Connection;
-    use hyper::server::conn::Http;
-    use hyper::service::Service;
     use std::future::Future;
     use std::pin::Pin;
     use std::{
@@ -437,6 +430,14 @@ mod test {
         sync::{Arc, Mutex},
         task::{self, Poll},
     };
+
+    use anyhow::Error;
+    use futures::FutureExt;
+    use http::Uri;
+    use hyper::client::connect::Connected;
+    use hyper::client::connect::Connection;
+    use hyper::server::conn::Http;
+    use hyper::service::Service;
     use tokio::io::{AsyncRead, AsyncWrite};
 
     type TestConnectorFuture = Pin<Box<dyn Future<Output = Result<TestConnection, Error>> + Send>>;
