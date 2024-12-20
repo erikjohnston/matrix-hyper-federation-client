@@ -23,4 +23,4 @@ signed-json = { git = "https://github.com/erikjohnston/rust-signed-json.git" }
 tokio = { version = "1.27.0", features = ["macros"] }
 tokio-rustls = "0.24.0"
 hickory-resolver = "0.24.2"
-url = "2.3.1"
+url = "2.5.4"
