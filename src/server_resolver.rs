@@ -13,7 +13,7 @@ use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
-use trust_dns_resolver::error::ResolveErrorKind;
+use hickory_resolver::error::ResolveErrorKind;
 use url::Url;
 
 use std::collections::BTreeMap;
@@ -48,13 +48,13 @@ pub struct Endpoint {
 /// A resolver for Matrix server names.
 #[derive(Debug, Clone)]
 pub struct MatrixResolver {
-    resolver: trust_dns_resolver::TokioAsyncResolver,
+    resolver: hickory_resolver::TokioAsyncResolver,
 }
 
 impl MatrixResolver {
     /// Create a new [`MatrixResolver`]
     pub async fn new() -> Result<MatrixResolver, Error> {
-        let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
+        let resolver = hickory_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
 
         Ok(MatrixResolver { resolver })
     }

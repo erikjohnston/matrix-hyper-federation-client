@@ -22,5 +22,5 @@ serde_json = "1.0.95"
 signed-json = { git = "https://github.com/erikjohnston/rust-signed-json.git" }
 tokio = { version = "1.27.0", features = ["macros"] }
 tokio-rustls = "0.24.0"
-trust-dns-resolver = "0.22.0"
+hickory-resolver = "0.24.2"
 url = "2.3.1"
