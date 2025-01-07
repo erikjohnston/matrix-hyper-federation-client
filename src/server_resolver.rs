@@ -1,8 +1,16 @@
 //! Module for resolving Matrix server names.
 
+use std::collections::BTreeMap;
+use std::future::Future;
+use std::net::IpAddr;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::{self, Poll};
+
 use anyhow::{format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
+use hickory_resolver::error::ResolveErrorKind;
 use http::header::{HOST, LOCATION};
 use http::{Request, Uri};
 use hyper::client::connect::Connect;
@@ -13,15 +21,7 @@ use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
-use trust_dns_resolver::error::ResolveErrorKind;
 use url::Url;
-
-use std::collections::BTreeMap;
-use std::future::Future;
-use std::net::IpAddr;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::task::{self, Poll};
 
 /// A resolved host for a Matrix server.
 #[derive(Debug, Clone)]
@@ -48,13 +48,13 @@ pub struct Endpoint {
 /// A resolver for Matrix server names.
 #[derive(Debug, Clone)]
 pub struct MatrixResolver {
-    resolver: trust_dns_resolver::TokioAsyncResolver,
+    resolver: hickory_resolver::TokioAsyncResolver,
 }
 
 impl MatrixResolver {
     /// Create a new [`MatrixResolver`]
     pub fn new() -> Result<MatrixResolver, Error> {
-        let resolver = trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
+        let resolver = hickory_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
 
         Ok(MatrixResolver { resolver })
     }
@@ -412,13 +412,6 @@ impl Service<Uri> for MatrixConnector {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Error;
-    use futures::FutureExt;
-    use http::Uri;
-    use hyper::client::connect::Connected;
-    use hyper::client::connect::Connection;
-    use hyper::server::conn::Http;
-    use hyper::service::Service;
     use std::future::Future;
     use std::pin::Pin;
     use std::{
@@ -426,6 +419,14 @@ mod test {
         sync::{Arc, Mutex},
         task::{self, Poll},
     };
+
+    use anyhow::Error;
+    use futures::FutureExt;
+    use http::Uri;
+    use hyper::client::connect::Connected;
+    use hyper::client::connect::Connection;
+    use hyper::server::conn::Http;
+    use hyper::service::Service;
     use tokio::io::{AsyncRead, AsyncWrite};
 
     type TestConnectorFuture = Pin<Box<dyn Future<Output = Result<TestConnection, Error>> + Send>>;

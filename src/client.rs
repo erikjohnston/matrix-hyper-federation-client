@@ -284,7 +284,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
 }
 
 /// The JSON structure used to generate signatures for requests.
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct RequestJson<'a, T> {
     method: &'a str,
     uri: &'a str,
@@ -292,6 +292,24 @@ pub struct RequestJson<'a, T> {
     destination: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<T>,
+}
+
+impl<'a, T> RequestJson<'a, T> {
+    pub fn new(
+        method: &'a str,
+        uri: &'a str,
+        origin: &'a str,
+        destination: &'a str,
+        content: Option<T>,
+    ) -> Self {
+        Self {
+            method,
+            uri,
+            origin,
+            destination,
+            content,
+        }
+    }
 }
 
 /// An extension trait for [`Builder`] that adds helper functions to create
