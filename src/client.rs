@@ -19,7 +19,7 @@ use signed_json::{Canonical, Signed};
 
 use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
-/// A [`hyper::Client`] that routes `matrix://` URIs correctly, but does not
+/// A [`hyper::Client`] that routes `matrix-federation://` URIs correctly, but does not
 /// sign the requests.
 ///
 /// Either use [`SigningFederationClient`] if you want requests to be automatically
@@ -34,6 +34,15 @@ impl FederationClient {
         FederationClient { client }
     }
 
+    /// Helper function to build a [`FederationClient`].
+    pub fn new_with_default_resolver() -> Result<FederationClient, Error> {
+        let connector = MatrixConnector::with_default_resolver()?;
+
+        Ok(FederationClient {
+            client: Client::builder().build(connector),
+        })
+    }
+
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
@@ -41,19 +50,10 @@ impl FederationClient {
     }
 }
 
-/// Helper function to build a [`FederationClient`].
-pub async fn new_federation_client() -> Result<FederationClient, Error> {
-    let connector = MatrixConnector::with_default_resolver().await?;
-
-    Ok(FederationClient {
-        client: Client::builder().build(connector),
-    })
-}
-
-/// A HTTP client that correctly resolves `matrix://` URIs and signs the
+/// A HTTP client that correctly resolves `matrix-federation://` URIs and signs the
 /// requests.
 ///
-/// This will fail for requests to a `matrix://` URI that have a non-JSON body.
+/// This will fail for requests to a `matrix-federation://` URI that have a non-JSON body.
 ///
 /// **Note**: Using this is less efficient than using a [`Client`] with a
 /// [`MatrixConnector`] and manually signing the requests, as the implementation
@@ -69,12 +69,12 @@ pub struct SigningFederationClient<C = MatrixConnector> {
 
 impl SigningFederationClient<MatrixConnector> {
     /// Create a new client with the default resolver.
-    pub async fn new(
+    pub fn new(
         server_name: impl ToString,
         key_id: impl ToString,
         secret_key: SigningKey,
     ) -> Result<Self, Error> {
-        let connector = MatrixConnector::with_default_resolver().await?;
+        let connector = MatrixConnector::with_default_resolver()?;
 
         Ok(SigningFederationClient {
             client: Client::builder().build(connector),
@@ -88,7 +88,7 @@ impl SigningFederationClient<MatrixConnector> {
 impl<C> SigningFederationClient<C> {
     /// Create a new [`SigningFederationClient`] using the given [`Client`].
     ///
-    /// Note, the connector used by the [`Client`] must support `matrix://`
+    /// Note, the connector used by the [`Client`] must support `matrix-federation://`
     /// URIs.
     pub fn with_client(
         client: Client<C>,
@@ -122,12 +122,12 @@ where
 
     /// Send the request.
     ///
-    /// For `matrix://` URIs the request body must be JSON (if not empty) and
+    /// For `matrix-federation://` URIs the request body must be JSON (if not empty) and
     /// the request will be signed.
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        if req.uri().scheme() != Some(&"matrix".parse()?) {
+        if req.uri().scheme() != Some(&"matrix-federation".parse()?) {
             return Ok(self.client.request(req).await?);
         }
         if !req.body().is_end_stream()
