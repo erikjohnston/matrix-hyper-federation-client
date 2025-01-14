@@ -251,10 +251,13 @@ where
     C: Connect + Clone + Sync + Send + 'static,
 {
     debug!("URI: {:?}", req.uri());
-    if req.uri().scheme_str() != Some("matrix-federation") {
-        debug!("Got scheme: {:?}", req.uri().scheme_str());
-        return Ok(req);
-    }
+    let matrix_url_scheme: &str = match req.uri().scheme_str() {
+        Some(scheme @ ("matrix" | "matrix-federation")) => scheme,
+        _ => {
+            debug!("Got scheme: {:?}", req.uri().scheme_str());
+            return Ok(req);
+        }
+    };
 
     let host = req.uri().host().context("missing host")?;
     let port = req.uri().port();
@@ -269,7 +272,9 @@ where
             debug!("Found well-known: {}", &w.server);
 
             let a = http::uri::Authority::from_str(&w.server)?;
-            let mut builder = Uri::builder().scheme("matrix-federation").authority(a);
+            // When building the new URL, use whatever scheme that was used in the
+            // original request.
+            let mut builder = Uri::builder().scheme(matrix_url_scheme).authority(a);
             if let Some(p) = req.uri().path_and_query() {
                 builder = builder.path_and_query(p.clone());
             }
@@ -298,7 +303,7 @@ pub struct WellKnownServer {
 }
 
 /// A connector that can be used with a [`hyper::Client`] that correctly
-/// resolves and connects to `matrix-federation://` URIs.
+/// resolves and connects to `matrix://` and `matrix-federation://` URIs.
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
@@ -345,19 +350,24 @@ impl Service<Uri> for MatrixConnector {
         let client_config = self.client_config.clone();
 
         async move {
-            if dst.scheme_str() != Some("matrix-federation") {
-                let mut https = hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_tls_config(client_config)
-                    .https_only()
-                    .enable_http1()
-                    .build();
+            // Return-early and make a normal request if the URI scheme is not
+            // `matrix://` or `matrix-federation://`.
+            match dst.scheme_str() {
+                Some("matrix") | Some("matrix-federation") => {}
+                _ => {
+                    let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                        .with_tls_config(client_config)
+                        .https_only()
+                        .enable_http1()
+                        .build();
 
-                let r = https.call(dst).await;
+                    let r = https.call(dst).await;
 
-                return match r {
-                    Ok(r) => Ok(r),
-                    Err(e) => Err(format_err!("{}", e)),
-                };
+                    return match r {
+                        Ok(r) => Ok(r),
+                        Err(e) => Err(format_err!("{}", e)),
+                    };
+                }
             }
 
             let endpoints = resolver

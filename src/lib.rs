@@ -2,7 +2,8 @@
 //!
 //! # [`SigningFederationClient`]
 //!
-//! The [`SigningFederationClient`] correctly routes `matrix-federation://` URIs and
+//! The [`SigningFederationClient`] correctly routes `matrix://` (Synapse <1.87.0rc1
+//! (2023-06-27)) and `matrix-federation://` (Synapse >=1.87.0rc1 (2023-06-27)) URIs and
 //! automatically signs such requests:
 //!
 //! ```no_run
@@ -28,8 +29,8 @@
 //! # [`FederationClient`]
 //!
 //! The [`FederationClient`] is just a standard [`hyper::Client`] with a
-//! [`MatrixConnector`] that can route `matrix-federation://` URIs, but does *not* sign the
-//! requests automatically:
+//! [`MatrixConnector`] that can route `matrix://` and `matrix-federation://` URIs, but
+//! does *not* sign the requests automatically:
 //!
 //! ```no_run
 //! # use matrix_hyper_federation_client::FederationClient;

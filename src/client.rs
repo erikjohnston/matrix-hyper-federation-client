@@ -19,8 +19,9 @@ use signed_json::{Canonical, Signed};
 
 use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
-/// A [`hyper::Client`] that routes `matrix-federation://` URIs correctly, but does not
-/// sign the requests.
+/// A [`hyper::Client`] that routes `matrix://` (Synapse <1.87.0rc1 (2023-06-27)) and
+/// `matrix-federation://` (Synapse >=1.87.0rc1 (2023-06-27)) URIs correctly, but does
+/// not sign the requests.
 ///
 /// Either use [`SigningFederationClient`] if you want requests to be automatically
 /// signed, or [`sign_and_build_json_request`] to sign the requests.
@@ -50,10 +51,10 @@ impl FederationClient {
     }
 }
 
-/// A HTTP client that correctly resolves `matrix-federation://` URIs and signs the
+/// A HTTP client that correctly resolves `matrix://` and `matrix-federation://` URIs and signs the
 /// requests.
 ///
-/// This will fail for requests to a `matrix-federation://` URI that have a non-JSON body.
+/// This will fail for requests to a `matrix://` or `matrix-federation://` URI that have a non-JSON body.
 ///
 /// **Note**: Using this is less efficient than using a [`Client`] with a
 /// [`MatrixConnector`] and manually signing the requests, as the implementation
@@ -88,8 +89,8 @@ impl SigningFederationClient<MatrixConnector> {
 impl<C> SigningFederationClient<C> {
     /// Create a new [`SigningFederationClient`] using the given [`Client`].
     ///
-    /// Note, the connector used by the [`Client`] must support `matrix-federation://`
-    /// URIs.
+    /// Note, the connector used by the [`Client`] must support `matrix://` and
+    /// `matrix-federation://` URIs.
     pub fn with_client(
         client: Client<C>,
         server_name: String,
@@ -122,14 +123,18 @@ where
 
     /// Send the request.
     ///
-    /// For `matrix-federation://` URIs the request body must be JSON (if not empty) and
-    /// the request will be signed.
+    /// For `matrix://` or `matrix-federation://` URIs the request body must be JSON (if
+    /// not empty) and the request will be signed.
     pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        if req.uri().scheme() != Some(&"matrix-federation".parse()?) {
-            return Ok(self.client.request(req).await?);
+        // Return-early and make a normal request if the URI scheme is not `matrix://`
+        // or `matrix-federation://`.
+        match req.uri().scheme_str() {
+            Some("matrix") | Some("matrix-federation") => {}
+            _ => return Ok(self.client.request(req).await?),
         }
+
         if !req.body().is_end_stream()
             && req.headers().get(CONTENT_TYPE)
                 != Some(&HeaderValue::from_static("application/json"))
