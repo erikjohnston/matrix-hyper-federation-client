@@ -10,7 +10,7 @@ use ed25519_dalek::SigningKey;
 use matrix_hyper_federation_client::SigningFederationClient;
 
 async fn run(secret_key: SigningKey) -> Result<(), anyhow::Error> {
-    let client = SigningFederationClient::new("local_server", "ed25519:sg5Sa", secret_key).await?;
+    let client = SigningFederationClient::new("local_server", "ed25519:sg5Sa", secret_key)?;
 
     let resp = client.get("matrix://matrix.org/_matrix/federation/v1/version".parse()?).await?;
 
