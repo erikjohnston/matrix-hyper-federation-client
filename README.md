@@ -2,9 +2,9 @@
 
 A hyper client for handling internal Synapse routing of outbound federation traffic.
 
- - `matrix-federation://`: Used in Synapse >= [1.87.0rc1](synapse-1.87.0rc1-changelog)
+ - `matrix-federation://`: Used in Synapse >= [1.87.0rc1][synapse-1.87.0rc1-changelog]
    (2023-06-27)
- - `matrix://`: Used in Synapse < [1.87.0rc1](synapse-1.87.0rc1-changelog) (2023-06-27)
+ - `matrix://`: Used in Synapse < [1.87.0rc1][synapse-1.87.0rc1-changelog] (2023-06-27)
 
 [synapse-1.87.0rc1-changelog]: https://github.com/element-hq/synapse/blob/develop/docs/changelogs/CHANGES-2023.md#synapse-1870rc1-2023-06-27
 
