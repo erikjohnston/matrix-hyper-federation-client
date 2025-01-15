@@ -353,7 +353,7 @@ impl Service<Uri> for MatrixConnector {
             // Return-early and make a normal request if the URI scheme is not
             // `matrix://` or `matrix-federation://`.
             match dst.scheme_str() {
-                Some("matrix") | Some("matrix-federation") => {}
+                Some("matrix" | "matrix-federation") => {}
                 _ => {
                     let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                         .with_tls_config(client_config)
