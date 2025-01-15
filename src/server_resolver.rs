@@ -10,6 +10,7 @@ use std::task::{self, Poll};
 use anyhow::{format_err, Context, Error};
 use futures::FutureExt;
 use futures_util::stream::StreamExt;
+use hickory_resolver::error::ResolveErrorKind;
 use http::header::{HOST, LOCATION};
 use http::{Request, Uri};
 use hyper::client::connect::Connect;
@@ -20,7 +21,6 @@ use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
-use hickory_resolver::error::ResolveErrorKind;
 use url::Url;
 
 /// A resolved host for a Matrix server.
@@ -53,7 +53,7 @@ pub struct MatrixResolver {
 
 impl MatrixResolver {
     /// Create a new [`MatrixResolver`]
-    pub async fn new() -> Result<MatrixResolver, Error> {
+    pub fn new() -> Result<MatrixResolver, Error> {
         let resolver = hickory_resolver::TokioAsyncResolver::tokio_from_system_conf()?;
 
         Ok(MatrixResolver { resolver })
@@ -119,17 +119,6 @@ impl MatrixResolver {
         } else {
             host.to_string()
         };
-
-        // If a literal IP or includes port then we shortcircuit.
-        if host.parse::<IpAddr>().is_ok() || port.is_some() {
-            return Ok(vec![Endpoint {
-                host: host.to_string(),
-                port: port.unwrap_or(8448),
-
-                host_header: authority.to_string(),
-                tls_name: host.to_string(),
-            }]);
-        }
 
         // If a literal IP or includes port then we short circuit.
         if host.parse::<IpAddr>().is_ok() || port.is_some() {
@@ -262,10 +251,13 @@ where
     C: Connect + Clone + Sync + Send + 'static,
 {
     debug!("URI: {:?}", req.uri());
-    if req.uri().scheme_str() != Some("matrix") {
-        debug!("Got scheme: {:?}", req.uri().scheme_str());
-        return Ok(req);
-    }
+    let matrix_url_scheme: &str = match req.uri().scheme_str() {
+        Some(scheme @ ("matrix" | "matrix-federation")) => scheme,
+        _ => {
+            debug!("Got scheme: {:?}", req.uri().scheme_str());
+            return Ok(req);
+        }
+    };
 
     let host = req.uri().host().context("missing host")?;
     let port = req.uri().port();
@@ -280,7 +272,9 @@ where
             debug!("Found well-known: {}", &w.server);
 
             let a = http::uri::Authority::from_str(&w.server)?;
-            let mut builder = Uri::builder().scheme("matrix").authority(a);
+            // When building the new URL, use whatever scheme that was used in the
+            // original request.
+            let mut builder = Uri::builder().scheme(matrix_url_scheme).authority(a);
             if let Some(p) = req.uri().path_and_query() {
                 builder = builder.path_and_query(p.clone());
             }
@@ -309,7 +303,7 @@ pub struct WellKnownServer {
 }
 
 /// A connector that can be used with a [`hyper::Client`] that correctly
-/// resolves and connects to `matrix://` URIs.
+/// resolves and connects to `matrix://` and `matrix-federation://` URIs.
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
     resolver: MatrixResolver,
@@ -331,8 +325,8 @@ impl MatrixConnector {
     }
 
     /// Create new [`MatrixConnector`] with a default [`MatrixResolver`].
-    pub async fn with_default_resolver() -> Result<MatrixConnector, Error> {
-        let resolver = MatrixResolver::new().await?;
+    pub fn with_default_resolver() -> Result<MatrixConnector, Error> {
+        let resolver = MatrixResolver::new()?;
 
         Ok(MatrixConnector::with_resolver(resolver))
     }
@@ -356,19 +350,24 @@ impl Service<Uri> for MatrixConnector {
         let client_config = self.client_config.clone();
 
         async move {
-            if dst.scheme_str() != Some("matrix") {
-                let mut https = hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_tls_config(client_config)
-                    .https_only()
-                    .enable_http1()
-                    .build();
+            // Return-early and make a normal request if the URI scheme is not
+            // `matrix://` or `matrix-federation://`.
+            match dst.scheme_str() {
+                Some("matrix" | "matrix-federation") => {}
+                _ => {
+                    let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                        .with_tls_config(client_config)
+                        .https_only()
+                        .enable_http1()
+                        .build();
 
-                let r = https.call(dst).await;
+                    let r = https.call(dst).await;
 
-                return match r {
-                    Ok(r) => Ok(r),
-                    Err(e) => Err(format_err!("{}", e)),
-                };
+                    return match r {
+                        Ok(r) => Ok(r),
+                        Err(e) => Err(format_err!("{}", e)),
+                    };
+                }
             }
 
             let endpoints = resolver
