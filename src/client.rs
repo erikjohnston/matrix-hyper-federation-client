@@ -15,7 +15,8 @@ use hyper::client::connect::Connect;
 use hyper::{Body, Client, Request, Response};
 use serde::Serialize;
 use serde_json::value::RawValue;
-use signed_json::{Canonical, Signed};
+use signed_json::signed::Wrap;
+use signed_json::{Canonical, CanonicalWrapper, Signed};
 
 use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
