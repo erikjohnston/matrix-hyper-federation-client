@@ -17,6 +17,7 @@ use hyper::service::Service;
 use hyper_rustls::MaybeHttpsStream;
 use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioIo;
 use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
@@ -328,10 +329,10 @@ impl MatrixConnector {
 }
 
 type ConnectorFuture =
-    Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<TcpStream>, Error>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<TokioIo<TcpStream>>, Error>> + Send>>;
 
 impl Service<Uri> for MatrixConnector {
-    type Response = MaybeHttpsStream<TcpStream>;
+    type Response = MaybeHttpsStream<TokioIo<TcpStream>>;
     type Error = Error;
     type Future = ConnectorFuture;
 
@@ -345,13 +346,16 @@ impl Service<Uri> for MatrixConnector {
             match dst.scheme_str() {
                 Some("matrix" | "matrix-federation") => {}
                 _ => {
-                    let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                    let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
                         .with_tls_config(client_config)
                         .https_only()
                         .enable_http1()
                         .build();
 
-                    let r = https.call(dst).await;
+                    let https_connector =
+                        hyper_util::service::TowerToHyperService::new(https_connector);
+
+                    let r = https_connector.call(dst).await;
 
                     return match r {
                         Ok(r) => Ok(r),
@@ -370,12 +374,15 @@ impl Service<Uri> for MatrixConnector {
             for endpoint in endpoints {
                 debug!("Connecting to endpoint {:?}", endpoint);
 
-                let mut https = hyper_rustls::HttpsConnectorBuilder::new()
+                let mut https_connector = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config.clone())
                     .https_only()
                     .with_server_name(endpoint.tls_name.clone())
                     .enable_http1()
                     .build();
+
+                let https_connector =
+                    hyper_util::service::TowerToHyperService::new(https_connector);
 
                 let new_dst = Uri::builder()
                     .authority(format!("{}:{}", endpoint.host, endpoint.port))
@@ -383,7 +390,7 @@ impl Service<Uri> for MatrixConnector {
                     .path_and_query("/")
                     .build()?;
 
-                match https.call(new_dst).await {
+                match https_connector.call(new_dst).await {
                     Ok(r) => {
                         trace!(
                             "Connected to host={} port={}",
