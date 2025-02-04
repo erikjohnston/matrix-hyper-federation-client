@@ -15,7 +15,8 @@ use hyper::client::connect::Connect;
 use hyper::{Body, Client, Request, Response};
 use serde::Serialize;
 use serde_json::value::RawValue;
-use signed_json::{Canonical, Signed};
+use signed_json::signed::Wrap;
+use signed_json::{Canonical, CanonicalWrapper, Signed};
 
 use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
@@ -257,7 +258,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
     // We wrap any content in `Canonical` so that the content only get
     // serialized once.
     let canonical_content = if let Some(content) = content {
-        Some(Canonical::wrap(content).context("Failed to serialize content")?)
+        Some(Canonical::<_>::wrap(content).context("Failed to serialize content")?)
     } else {
         None
     };
