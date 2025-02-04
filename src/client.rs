@@ -258,7 +258,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
     // We wrap any content in `Canonical` so that the content only get
     // serialized once.
     let canonical_content = if let Some(content) = content {
-        Some(Canonical::wrap(content).context("Failed to serialize content")?)
+        Some(Canonical::<_>::wrap(content).context("Failed to serialize content")?)
     } else {
         None
     };
