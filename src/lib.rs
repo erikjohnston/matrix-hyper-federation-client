@@ -28,9 +28,9 @@
 //!
 //! # [`FederationClient`]
 //!
-//! The [`FederationClient`] is just a standard [`hyper::Client`] with a
-//! [`MatrixConnector`] that can route `matrix://` and `matrix-federation://` URIs, but
-//! does *not* sign the requests automatically:
+//! The [`FederationClient`] is just a standard [`hyper_util::client::legacy::Client`]
+//! with a [`MatrixConnector`] that can route `matrix://` and `matrix-federation://`
+//! URIs, but does *not* sign the requests automatically:
 //!
 //! ```no_run
 //! # use matrix_hyper_federation_client::FederationClient;

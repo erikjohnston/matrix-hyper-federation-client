@@ -6,13 +6,16 @@ use std::sync::Arc;
 use anyhow::{bail, format_err, Context, Error};
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
+use bytes::Bytes;
 use ed25519_dalek::SigningKey;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
 use http::{HeaderValue, Uri};
-use hyper::body::{to_bytes, HttpBody};
-use hyper::client::connect::Connect;
-use hyper::{Body, Client, Request, Response};
+use http_body_util::{BodyExt, Full};
+use hyper::{Request, Response};
+use hyper_util::client::legacy::connect::Connect;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use serde::Serialize;
 use serde_json::value::RawValue;
 use signed_json::signed::Wrap;
@@ -20,19 +23,19 @@ use signed_json::{Canonical, CanonicalWrapper, Signed};
 
 use crate::server_resolver::{handle_delegated_server, MatrixConnector};
 
-/// A [`hyper::Client`] that routes `matrix://` (Synapse <1.87.0rc1 (2023-06-27)) and
-/// `matrix-federation://` (Synapse >=1.87.0rc1 (2023-06-27)) URIs correctly, but does
-/// not sign the requests.
+/// A [`hyper_util::client::legacy::Client`] that routes `matrix://` (Synapse <1.87.0rc1
+/// (2023-06-27)) and `matrix-federation://` (Synapse >=1.87.0rc1 (2023-06-27)) URIs
+/// correctly, but does not sign the requests.
 ///
 /// Either use [`SigningFederationClient`] if you want requests to be automatically
 /// signed, or [`sign_and_build_json_request`] to sign the requests.
 #[derive(Debug, Clone)]
 pub struct FederationClient {
-    pub client: hyper::Client<MatrixConnector>,
+    pub client: Client<MatrixConnector, Full<Bytes>>,
 }
 
 impl FederationClient {
-    pub fn new(client: hyper::Client<MatrixConnector>) -> Self {
+    pub fn new(client: Client<MatrixConnector, Full<Bytes>>) -> Self {
         FederationClient { client }
     }
 
@@ -41,11 +44,14 @@ impl FederationClient {
         let connector = MatrixConnector::with_default_resolver()?;
 
         Ok(FederationClient {
-            client: Client::builder().build(connector),
+            client: Client::builder(TokioExecutor::new()).build(connector),
         })
     }
 
-    pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+    pub async fn request(
+        &self,
+        mut req: Request<Full<Bytes>>,
+    ) -> Result<Response<Full<Bytes>>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
         Ok(self.client.request(req).await?)
@@ -79,7 +85,7 @@ impl SigningFederationClient<MatrixConnector> {
         let connector = MatrixConnector::with_default_resolver()?;
 
         Ok(SigningFederationClient {
-            client: Client::builder().build(connector),
+            client: Client::builder(TokioExecutor::new()).build(connector),
             server_name: server_name.to_string(),
             key_id: key_id.to_string(),
             secret_key: Arc::new(secret_key),
@@ -114,8 +120,8 @@ where
     /// Make a GET request to the given URI.
     ///
     /// Will sign the request if the URI has a `matrix` scheme.
-    pub async fn get(&self, uri: Uri) -> Result<Response<Body>, Error> {
-        let body = Body::default();
+    pub async fn get(&self, uri: Uri) -> Result<Response<Full<Bytes>>, Error> {
+        let body = Full::new(Bytes::new());
 
         let mut req = Request::new(body);
         *req.uri_mut() = uri;
@@ -126,7 +132,10 @@ where
     ///
     /// For `matrix://` or `matrix-federation://` URIs the request body must be JSON (if
     /// not empty) and the request will be signed.
-    pub async fn request(&self, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+    pub async fn request(
+        &self,
+        mut req: Request<Full<Bytes>>,
+    ) -> Result<Response<Full<Bytes>>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
         // Return-early and make a normal request if the URI scheme is not `matrix://`
@@ -136,19 +145,14 @@ where
             _ => return Ok(self.client.request(req).await?),
         }
 
-        if !req.body().is_end_stream()
-            && req.headers().get(CONTENT_TYPE)
-                != Some(&HeaderValue::from_static("application/json"))
-        {
+        if req.headers().get(CONTENT_TYPE) != Some(&HeaderValue::from_static("application/json")) {
             bail!("Request has a non-JSON body")
         }
 
         let (mut parts, body) = req.into_parts();
 
-        let content = if body.is_end_stream() {
-            None
-        } else {
-            let bytes = to_bytes(body).await?;
+        let content = {
+            let bytes = BodyExt::collect(body).await.unwrap().to_bytes();
             let json_string = String::from_utf8(bytes.to_vec())?;
             Some(RawValue::from_string(json_string)?)
         };
@@ -167,7 +171,7 @@ where
         let new_body = if let Some(raw_value) = content {
             raw_value.to_string().into()
         } else {
-            Body::default()
+            Full::new(Bytes::new())
         };
 
         let new_req = Request::from_parts(parts, new_body);
@@ -237,7 +241,7 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
     secret_key: &SigningKey,
     mut request_builder: Builder,
     content: Option<T>,
-) -> Result<Request<Body>, Error> {
+) -> Result<Request<Full<Bytes>>, Error> {
     let uri = request_builder
         .uri_ref()
         .ok_or_else(|| format_err!("URI must be set"))?;
@@ -276,9 +280,9 @@ pub fn sign_and_build_json_request<T: serde::Serialize>(
     let header_value = header_string.try_into()?;
 
     let body = if let Some(c) = canonical_content {
-        Body::from(c.into_canonical())
+        Full::new(Bytes::from(c.into_canonical()))
     } else {
-        Body::default()
+        Full::new(Bytes::new())
     };
 
     request_builder
@@ -327,7 +331,7 @@ pub trait SignedRequestBuilderExt {
         server_name: &str,
         key_id: &str,
         secret_key: &SigningKey,
-    ) -> Result<Request<Body>, Error>;
+    ) -> Result<Request<Full<Bytes>>, Error>;
 
     /// Sign and build the request with the given JSON body.
     fn signed_json<T: Serialize>(
@@ -336,7 +340,7 @@ pub trait SignedRequestBuilderExt {
         key_id: &str,
         secret_key: &SigningKey,
         content: T,
-    ) -> Result<Request<Body>, Error>;
+    ) -> Result<Request<Full<Bytes>>, Error>;
 
     /// Sign and build the request with optional JSON body.
     fn signed_json_opt<T: Serialize>(
@@ -345,7 +349,7 @@ pub trait SignedRequestBuilderExt {
         key_id: &str,
         secret_key: &SigningKey,
         content: Option<T>,
-    ) -> Result<Request<Body>, Error>;
+    ) -> Result<Request<Full<Bytes>>, Error>;
 }
 
 impl SignedRequestBuilderExt for Builder {
@@ -354,7 +358,7 @@ impl SignedRequestBuilderExt for Builder {
         server_name: &str,
         key_id: &str,
         secret_key: &SigningKey,
-    ) -> Result<Request<Body>, Error> {
+    ) -> Result<Request<Full<Bytes>>, Error> {
         sign_and_build_json_request::<()>(server_name, key_id, secret_key, self, None)
     }
 
@@ -364,7 +368,7 @@ impl SignedRequestBuilderExt for Builder {
         key_id: &str,
         secret_key: &SigningKey,
         content: T,
-    ) -> Result<Request<Body>, Error> {
+    ) -> Result<Request<Full<Bytes>>, Error> {
         sign_and_build_json_request(server_name, key_id, secret_key, self, Some(content))
     }
 
@@ -374,7 +378,7 @@ impl SignedRequestBuilderExt for Builder {
         key_id: &str,
         secret_key: &SigningKey,
         content: Option<T>,
-    ) -> Result<Request<Body>, Error> {
+    ) -> Result<Request<Full<Bytes>>, Error> {
         if let Some(content) = content {
             self.signed_json(server_name, key_id, secret_key, content)
         } else {
