@@ -52,16 +52,10 @@ impl FederationClient {
     pub async fn request(
         &self,
         mut req: Request<Full<Bytes>>,
-    ) -> Result<Response<Full<Bytes>>, Error> {
+    ) -> Result<Response<hyper::body::Incoming>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        match self.client.request(req).await {
-            Ok(resp) => match BodyExt::collect(resp.into_body()).await {
-                Ok(collected_bytes) => Ok(Response::new(Full::new(collected_bytes.to_bytes()))),
-                Err(err) => Err(err.into()),
-            },
-            Err(err) => Err(err.into()),
-        }
+        self.client.request(req).await.map_err(Into::into)
     }
 }
 
@@ -127,11 +121,9 @@ where
     /// Make a GET request to the given URI.
     ///
     /// Will sign the request if the URI has a `matrix` scheme.
-    pub async fn get(&self, uri: Uri) -> Result<Response<Full<Bytes>>, Error> {
-        let body = Full::new(Bytes::new());
+    pub async fn get(&self, uri: Uri) -> Result<Response<hyper::body::Incoming>, Error> {
+        let req = Request::builder().uri(uri).body(Full::new(Bytes::new()))?;
 
-        let mut req = Request::new(body);
-        *req.uri_mut() = uri;
         self.request(req).await
     }
 
@@ -142,7 +134,7 @@ where
     pub async fn request(
         &self,
         mut req: Request<Full<Bytes>>,
-    ) -> Result<Response<Full<Bytes>>, Error> {
+    ) -> Result<Response<hyper::body::Incoming>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
         // Return-early and make a normal request if the URI scheme is not `matrix://`
@@ -150,15 +142,7 @@ where
         match req.uri().scheme_str() {
             Some("matrix") | Some("matrix-federation") => {}
             _ => {
-                return match self.client.request(req).await {
-                    Ok(resp) => match BodyExt::collect(resp.into_body()).await {
-                        Ok(collected_bytes) => {
-                            Ok(Response::new(Full::new(collected_bytes.to_bytes())))
-                        }
-                        Err(err) => Err(err.into()),
-                    },
-                    Err(err) => Err(err.into()),
-                };
+                return self.client.request(req).await.map_err(Into::into);
             }
         }
 
@@ -198,13 +182,7 @@ where
 
         let new_req = Request::from_parts(parts, new_body);
 
-        match self.client.request(new_req).await {
-            Ok(resp) => match BodyExt::collect(resp.into_body()).await {
-                Ok(collected_bytes) => Ok(Response::new(Full::new(collected_bytes.to_bytes()))),
-                Err(err) => Err(err.into()),
-            },
-            Err(err) => Err(err.into()),
-        }
+        self.client.request(new_req).await.map_err(Into::into)
     }
 }
 
