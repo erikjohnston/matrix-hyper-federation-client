@@ -54,7 +54,13 @@ impl FederationClient {
     ) -> Result<Response<Full<Bytes>>, Error> {
         req = handle_delegated_server(&self.client, req).await?;
 
-        Ok(self.client.request(req).await?)
+        match self.client.request(req).await {
+            Ok(resp) => match BodyExt::collect(resp.into_body()).await {
+                Ok(collected_bytes) => Ok(Response::new(Full::new(collected_bytes.to_bytes()))),
+                Err(err) => Err(err.into()),
+            },
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -142,7 +148,17 @@ where
         // or `matrix-federation://`.
         match req.uri().scheme_str() {
             Some("matrix") | Some("matrix-federation") => {}
-            _ => return Ok(self.client.request(req).await?),
+            _ => {
+                return match self.client.request(req).await {
+                    Ok(resp) => match BodyExt::collect(resp.into_body()).await {
+                        Ok(collected_bytes) => {
+                            Ok(Response::new(Full::new(collected_bytes.to_bytes())))
+                        }
+                        Err(err) => Err(err.into()),
+                    },
+                    Err(err) => Err(err.into()),
+                };
+            }
         }
 
         if req.headers().get(CONTENT_TYPE) != Some(&HeaderValue::from_static("application/json")) {
@@ -176,7 +192,13 @@ where
 
         let new_req = Request::from_parts(parts, new_body);
 
-        Ok(self.client.request(new_req).await?)
+        match self.client.request(new_req).await {
+            Ok(resp) => match BodyExt::collect(resp.into_body()).await {
+                Ok(collected_bytes) => Ok(Response::new(Full::new(collected_bytes.to_bytes()))),
+                Err(err) => Err(err.into()),
+            },
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
