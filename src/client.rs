@@ -69,7 +69,7 @@ impl FederationClient {
 /// signed.
 #[derive(Debug, Clone)]
 pub struct SigningFederationClient<C = MatrixConnector> {
-    client: Client<C>,
+    client: Client<C, Full<Bytes>>,
     server_name: String,
     key_id: String,
     secret_key: Arc<SigningKey>,
@@ -99,7 +99,7 @@ impl<C> SigningFederationClient<C> {
     /// Note, the connector used by the [`Client`] must support `matrix://` and
     /// `matrix-federation://` URIs.
     pub fn with_client(
-        client: Client<C>,
+        client: Client<C, Full<Bytes>>,
         server_name: String,
         key_name: String,
         secret_key: SigningKey,

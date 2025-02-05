@@ -374,7 +374,7 @@ impl Service<Uri> for MatrixConnector {
             for endpoint in endpoints {
                 debug!("Connecting to endpoint {:?}", endpoint);
 
-                let mut https_connector = hyper_rustls::HttpsConnectorBuilder::new()
+                let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config.clone())
                     .https_only()
                     .with_server_name(endpoint.tls_name.clone())

@@ -18,7 +18,13 @@ http = "1.2.0"
 http-body-util = "0.1.2"
 hyper = { version = "1.6.0", features = ["client", "http1", "server"] }
 hyper-rustls = "0.27.5"
-hyper-util = { version = "0.1.10", features = ["server", "service"] }
+hyper-util = { version = "0.1.10", features = [
+  "client",
+  "client-legacy",
+  "server",
+  "service",
+  "tokio",
+] }
 log = "0.4.17"
 rand = "0.8.5"
 serde = { version = "1.0.159", features = ["derive"] }
