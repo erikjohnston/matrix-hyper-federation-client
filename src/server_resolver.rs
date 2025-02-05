@@ -14,7 +14,7 @@ use hickory_resolver::error::ResolveErrorKind;
 use http::header::{HOST, LOCATION};
 use http::{Request, Uri};
 use http_body_util::{BodyExt, Full};
-use hyper_rustls::MaybeHttpsStream;
+use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
 use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioIo;
@@ -311,8 +311,8 @@ impl MatrixConnector {
     /// Create new [`MatrixConnector`] with the given [`MatrixResolver`].
     pub fn with_resolver(resolver: MatrixResolver) -> MatrixConnector {
         let client_config = ClientConfig::builder()
-            .with_safe_defaults()
             .with_native_roots()
+            .unwrap()
             .with_no_client_auth();
 
         MatrixConnector {
