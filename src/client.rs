@@ -12,6 +12,7 @@ use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::request::{Builder, Parts};
 use http::{HeaderValue, Uri};
 use http_body_util::{BodyExt, Full};
+use hyper::body::Body;
 use hyper::{Request, Response};
 use hyper_util::client::legacy::connect::Connect;
 use hyper_util::client::legacy::Client;
@@ -161,13 +162,18 @@ where
             }
         }
 
-        if req.headers().get(CONTENT_TYPE) != Some(&HeaderValue::from_static("application/json")) {
+        if !req.body().is_end_stream()
+            && req.headers().get(CONTENT_TYPE)
+                != Some(&HeaderValue::from_static("application/json"))
+        {
             bail!("Request has a non-JSON body")
         }
 
         let (mut parts, body) = req.into_parts();
 
-        let content = {
+        let content = if body.is_end_stream() {
+            None
+        } else {
             let bytes = BodyExt::collect(body).await.unwrap().to_bytes();
             let json_string = String::from_utf8(bytes.to_vec())?;
             Some(RawValue::from_string(json_string)?)
