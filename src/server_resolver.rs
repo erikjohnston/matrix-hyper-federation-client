@@ -1,6 +1,7 @@
 //! Module for resolving Matrix server names.
 
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -380,7 +381,12 @@ impl Service<Uri> for MatrixConnector {
                 let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config.clone())
                     .https_only()
-                    .with_server_name(endpoint.tls_name.clone())
+                    .with_server_name_resolver(hyper_rustls::FixedServerNameResolver::new(
+                        endpoint.tls_name.clone().try_into().context(format!(
+                            "failed to create `ServerName` from `endpoint.tls_name`: {}",
+                            endpoint.tls_name
+                        ))?,
+                    ))
                     .enable_http1()
                     .build();
 
