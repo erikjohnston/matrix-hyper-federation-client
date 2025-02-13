@@ -1,6 +1,7 @@
 //! Module for resolving Matrix server names.
 
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -8,19 +9,21 @@ use std::str::FromStr;
 use std::task::{self, Poll};
 
 use anyhow::{format_err, Context, Error};
+use bytes::Bytes;
 use futures::FutureExt;
-use futures_util::stream::StreamExt;
 use hickory_resolver::error::ResolveErrorKind;
 use http::header::{HOST, LOCATION};
 use http::{Request, Uri};
-use hyper::client::connect::Connect;
-use hyper::service::Service;
-use hyper::{Body, Client};
+use http_body_util::{BodyExt, Full};
 use hyper_rustls::{ConfigBuilderExt, MaybeHttpsStream};
+use hyper_util::client::legacy::connect::Connect;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioIo;
 use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::ClientConfig;
+use tower_service::Service;
 use url::Url;
 
 /// A resolved host for a Matrix server.
@@ -186,7 +189,10 @@ impl MatrixResolver {
 }
 
 /// Check if there is a `.well-known` file present on the given host.
-pub async fn get_well_known<C>(http_client: &Client<C>, host: &str) -> Option<WellKnownServer>
+pub async fn get_well_known<C>(
+    http_client: &Client<C, Full<Bytes>>,
+    host: &str,
+) -> Option<WellKnownServer>
 where
     C: Connect + Clone + Sync + Send + 'static,
 {
@@ -224,16 +230,8 @@ where
             };
         }
 
-        let mut body = resp.into_body();
-
-        let mut vec = Vec::new();
-        while let Some(next) = body.next().await {
-            // TODO: Limit size of body.
-            let chunk = next.ok()?;
-            vec.extend(chunk);
-        }
-
-        return serde_json::from_slice(&vec).ok();
+        let bytes = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        return serde_json::from_slice(&bytes).ok();
     }
 
     debug!("Redirection loop exhausted");
@@ -244,9 +242,9 @@ where
 /// Check if the request is pointing at a delegated server, and if so replace
 /// with delegated info.
 pub async fn handle_delegated_server<C>(
-    http_client: &Client<C>,
-    mut req: Request<Body>,
-) -> Result<Request<Body>, Error>
+    http_client: &Client<C, Full<Bytes>>,
+    mut req: Request<Full<Bytes>>,
+) -> Result<Request<Full<Bytes>>, Error>
 where
     C: Connect + Clone + Sync + Send + 'static,
 {
@@ -302,7 +300,7 @@ pub struct WellKnownServer {
     pub server: String,
 }
 
-/// A connector that can be used with a [`hyper::Client`] that correctly
+/// A connector that can be used with a [`hyper_util::client::legacy::Client`] that correctly
 /// resolves and connects to `matrix://` and `matrix-federation://` URIs.
 #[derive(Debug, Clone)]
 pub struct MatrixConnector {
@@ -314,8 +312,8 @@ impl MatrixConnector {
     /// Create new [`MatrixConnector`] with the given [`MatrixResolver`].
     pub fn with_resolver(resolver: MatrixResolver) -> MatrixConnector {
         let client_config = ClientConfig::builder()
-            .with_safe_defaults()
             .with_native_roots()
+            .unwrap()
             .with_no_client_auth();
 
         MatrixConnector {
@@ -333,10 +331,10 @@ impl MatrixConnector {
 }
 
 type ConnectorFuture =
-    Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<TcpStream>, Error>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<MaybeHttpsStream<TokioIo<TcpStream>>, Error>> + Send>>;
 
 impl Service<Uri> for MatrixConnector {
-    type Response = MaybeHttpsStream<TcpStream>;
+    type Response = MaybeHttpsStream<TokioIo<TcpStream>>;
     type Error = Error;
     type Future = ConnectorFuture;
 
@@ -383,7 +381,12 @@ impl Service<Uri> for MatrixConnector {
                 let mut https = hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(client_config.clone())
                     .https_only()
-                    .with_server_name(endpoint.tls_name.clone())
+                    .with_server_name_resolver(hyper_rustls::FixedServerNameResolver::new(
+                        endpoint.tls_name.clone().try_into().context(format!(
+                            "failed to create `ServerName` from `endpoint.tls_name`: {}",
+                            endpoint.tls_name
+                        ))?,
+                    ))
                     .enable_http1()
                     .build();
 
@@ -417,184 +420,5 @@ impl Service<Uri> for MatrixConnector {
             Err(format_err!("failed to connect to any endpoint"))
         }
         .boxed()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::{
-        io::Cursor,
-        sync::{Arc, Mutex},
-        task::{self, Poll},
-    };
-
-    use anyhow::Error;
-    use futures::FutureExt;
-    use http::Uri;
-    use hyper::client::connect::Connected;
-    use hyper::client::connect::Connection;
-    use hyper::server::conn::Http;
-    use hyper::service::Service;
-    use tokio::io::{AsyncRead, AsyncWrite};
-
-    type TestConnectorFuture = Pin<Box<dyn Future<Output = Result<TestConnection, Error>> + Send>>;
-
-    /// A connector that returns a connection which returns 200 OK to all connections.
-    #[derive(Clone)]
-    pub struct TestConnector;
-
-    impl Service<Uri> for TestConnector {
-        type Response = TestConnection;
-        type Error = Error;
-        type Future = TestConnectorFuture;
-
-        fn poll_ready(&mut self, _: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-            // This connector is always ready, but others might not be.
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, _dst: Uri) -> Self::Future {
-            let (client, server) = TestConnection::double_ended();
-
-            {
-                let service = hyper::service::service_fn(|_| async move {
-                    Ok(hyper::Response::new(hyper::Body::from("Hello World")))
-                        as Result<_, hyper::http::Error>
-                });
-                let fut = Http::new().serve_connection(server, service);
-                tokio::spawn(fut);
-            }
-
-            futures::future::ok(client).boxed()
-        }
-    }
-
-    #[derive(Default)]
-    struct TestConnectionInner {
-        outbound_buffer: Cursor<Vec<u8>>,
-        inbound_buffer: Cursor<Vec<u8>>,
-        wakers: Vec<futures::task::Waker>,
-    }
-
-    /// A in memory connection for use with tests.
-    #[derive(Clone, Default)]
-    pub struct TestConnection {
-        inner: Arc<Mutex<TestConnectionInner>>,
-        direction: bool,
-    }
-
-    impl TestConnection {
-        pub fn double_ended() -> (TestConnection, TestConnection) {
-            let inner: Arc<Mutex<TestConnectionInner>> = Arc::default();
-
-            let a = TestConnection {
-                inner: inner.clone(),
-                direction: false,
-            };
-
-            let b = TestConnection {
-                inner,
-                direction: true,
-            };
-
-            (a, b)
-        }
-    }
-
-    impl AsyncRead for TestConnection {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            cx: &mut task::Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            let mut conn = self.inner.lock().expect("mutex");
-
-            let buffer = if self.direction {
-                &mut conn.inbound_buffer
-            } else {
-                &mut conn.outbound_buffer
-            };
-
-            let mut slice = [0; 1024];
-
-            let bytes_read = std::io::Read::read(buffer, &mut slice)?;
-            if bytes_read > 0 {
-                buf.put_slice(&slice[..bytes_read]);
-                Poll::Ready(Ok(()))
-            } else {
-                conn.wakers.push(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-
-    impl AsyncWrite for TestConnection {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            _cx: &mut task::Context<'_>,
-            buf: &[u8],
-        ) -> Poll<Result<usize, std::io::Error>> {
-            let mut conn = self.inner.lock().expect("mutex");
-
-            if self.direction {
-                conn.outbound_buffer.get_mut().extend_from_slice(buf);
-            } else {
-                conn.inbound_buffer.get_mut().extend_from_slice(buf);
-            }
-
-            for waker in conn.wakers.drain(..) {
-                waker.wake()
-            }
-
-            Poll::Ready(Ok(buf.len()))
-        }
-        fn poll_flush(
-            self: Pin<&mut Self>,
-            cx: &mut task::Context<'_>,
-        ) -> Poll<Result<(), std::io::Error>> {
-            let mut conn = self.inner.lock().expect("mutex");
-
-            if self.direction {
-                Pin::new(&mut conn.outbound_buffer).poll_flush(cx)
-            } else {
-                Pin::new(&mut conn.inbound_buffer).poll_flush(cx)
-            }
-        }
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            cx: &mut task::Context<'_>,
-        ) -> Poll<Result<(), std::io::Error>> {
-            let mut conn = self.inner.lock().expect("mutex");
-
-            if self.direction {
-                Pin::new(&mut conn.outbound_buffer).poll_shutdown(cx)
-            } else {
-                Pin::new(&mut conn.inbound_buffer).poll_shutdown(cx)
-            }
-        }
-    }
-
-    impl Connection for TestConnection {
-        fn connected(&self) -> Connected {
-            Connected::new()
-        }
-    }
-
-    #[tokio::test]
-    async fn test_memory_connection() {
-        // TODO: Flesh out tests.
-        let client: hyper::Client<_, hyper::Body> = hyper::Client::builder().build(TestConnector);
-
-        let response = client
-            .get("http://localhost".parse().unwrap())
-            .await
-            .unwrap();
-
-        assert!(response.status().is_success());
-
-        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(&bytes[..], b"Hello World");
     }
 }

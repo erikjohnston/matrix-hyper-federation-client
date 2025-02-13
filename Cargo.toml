@@ -9,19 +9,29 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1.0.70"
 base64 = "0.21.0"
+bytes = "1.10.0"
 doc-comment = "0.3.3"
 ed25519-dalek = "2.0.0"
 futures = "0.3.28"
 futures-util = "0.3.28"
-http = "0.2.9"
-hyper = { version = "0.14.25", features = ["client", "http1", "server", "stream"] }
-hyper-rustls = "0.24.0"
+http = "1.2.0"
+http-body-util = "0.1.2"
+hyper = { version = "1.6.0", features = ["client", "http1", "server"] }
+hyper-rustls = "0.27.5"
+hyper-util = { version = "0.1.10", features = [
+  "client",
+  "client-legacy",
+  "server",
+  "service",
+  "tokio",
+] }
 log = "0.4.17"
 rand = "0.8.5"
 serde = { version = "1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
 signed-json = { git = "https://github.com/erikjohnston/rust-signed-json.git" }
 tokio = { version = "1.27.0", features = ["macros"] }
-tokio-rustls = "0.24.0"
+tokio-rustls = "0.26.1"
+tower-service = "0.3.3"
 hickory-resolver = "0.24.2"
 url = "2.5.4"
